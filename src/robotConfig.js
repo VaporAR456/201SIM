@@ -11,8 +11,8 @@ export const ROBOT_201 = {
   name: 'FRC 201',
 
   // Size
-  frameLength: 27.5 * IN, // frame perimeter, front to back (without bumpers); 34in with bumpers
-  frameWidth: 27 * IN,
+  frameLength: 27 * IN, // frame, front to back, without bumpers (CAD)
+  frameWidth: 28.125 * IN, // frame side to side, without bumpers (CAD)
   bumperThickness: 3.25 * IN,
   bumperHeight: 5 * IN, // bumper zone thickness
   bumperBottom: 2 * IN, // gap between carpet and bottom of bumpers
@@ -20,12 +20,12 @@ export const ROBOT_201 = {
   // deployed intake reaches this far past the front bumper (CAD: 8.1in)
   intakeReach: 0.207,
   intakeWidth: 0.72,
-  mass: 60, // kg, with battery and bumpers (MoSim mod robotWeight 60; check if that was lb)
+  mass: 60, // kg, PLACEHOLDER: from the MoSim mod, which the CAD lead says is not accurate
 
   // Swerve
   // Kraken X60 (6000 rpm free) through 6:1 on a 4in wheel = 5.32 m/s free; ~90% of that on carpet
   driveRatio: 6,
-  maxSpeed: 4.8, // m/s
+  maxSpeed: 4.8, // m/s, PLACEHOLDER: from the MoSim mod, waiting on real numbers
   maxAccel: 9.0, // m/s^2, traction-limited (wheel friction 1.1 x g, minus losses)
   maxOmega: 2 * Math.PI * 1.6, // rad/s top turn rate
   maxAlpha: 30, // rad/s^2 turn acceleration
@@ -54,6 +54,12 @@ export const ROBOT_201 = {
     spreadDeg: 1.0,
     speedNoise: 0.02,
   },
+
+  // Where held FUEL sits (robot frame, meters), and the net stretched over the top of it
+  hopperBox: { x: [-0.3, 0.3], z: [-0.3, 0.3], y0: 0.1, netY: 0.6 },
+  // The net: when the hopper is full, ramming more FUEL into the intake crams one extra in every
+  // cramEvery seconds (up to cramExtra); keep forcing it for breakAfter seconds and it tears.
+  net: { cramExtra: 3, cramEvery: 1.5, breakAfter: 5, recover: 0.5 },
 
   // Drive speed presets (fraction of top speed) for the Drive speed 1 / 2 / 3 buttons
   speedLevels: [0.35, 0.7, 1],

@@ -39,7 +39,8 @@ export const ACTIONS = {
   speed1: { label: 'Drive speed 1 (slow)', pad: null, keys: ['Digit1'] },
   speed2: { label: 'Drive speed 2', pad: null, keys: ['Digit2'] },
   speed3: { label: 'Drive speed 3 (full)', pad: null, keys: ['Digit3'] },
-  toggleFieldRel: { label: 'Field / robot relative', pad: { b: PAD.LS }, keys: ['KeyF'] },
+  // was left stick click, which is too easy to hit by accident while driving
+  toggleFieldRel: { label: 'Field / robot relative', pad: { b: PAD.LEFT }, keys: ['KeyF'] },
   resetGyro: { label: 'Reset gyro', pad: { b: PAD.UP }, keys: ['KeyG'] },
   pause: { label: 'Pause', pad: { b: PAD.MENU }, keys: ['Escape'] },
   restart: { label: 'Restart (hold)', pad: { b: PAD.VIEW }, keys: ['Backspace'] },
@@ -54,7 +55,7 @@ export const ACTIONS = {
 // Menu keys that never change, so you can always get back out
 const FIXED = { confirm: { pad: { b: PAD.A }, keys: ['Enter'] } };
 
-const STORAGE_KEY = '201sim.bindings.v2';
+const STORAGE_KEY = '201sim.bindings.v3';
 const DEADBAND = 0.08;
 
 export function padLabel(p) {

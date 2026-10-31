@@ -34,16 +34,51 @@ export class Game {
     this.aimLine.frustumCulled = false;
     this.aimLine.visible = false;
     scene.add(this.aimLine);
+
+    // FUEL you can see in the hopper, and the net over it
+    const hb = this.cfg.hopperBox;
+    this.slots = [];
+    const sp = FUEL_RADIUS * 2 + 0.004;
+    const nx = Math.max(1, Math.floor((hb.x[1] - hb.x[0]) / sp));
+    const nz = Math.max(1, Math.floor((hb.z[1] - hb.z[0]) / sp));
+    for (let layer = 0; this.slots.length < 100; layer++) {
+      for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+        const off = layer % 2 ? sp / 2 : 0; // stack in the gaps of the layer below
+        this.slots.push([hb.x[0] + sp / 2 + i * sp + off * 0.5, hb.y0 + FUEL_RADIUS + layer * sp * 0.82, hb.z[0] + sp / 2 + k * sp + off * 0.5]);
+      }
+    }
+    this.heldMesh = new THREE.InstancedMesh(fuel.mesh.geometry, fuel.mesh.material, this.slots.length);
+    this.heldMesh.castShadow = true;
+    this.heldMesh.count = 0;
+    robot.root.add(this.heldMesh);
+    this.heldMatrix = new THREE.Matrix4();
+
+    const net = new THREE.GridHelper(1, 10, 0x111111, 0x111111);
+    net.scale.set(hb.x[1] - hb.x[0], 1, hb.z[1] - hb.z[0]);
+    net.position.set((hb.x[0] + hb.x[1]) / 2, hb.netY, (hb.z[0] + hb.z[1]) / 2);
+    net.material.transparent = true;
+    net.material.opacity = 0.7;
+    robot.root.add(net);
+    this.netMesh = net;
+  }
+
+  /** How many FUEL fit right now: the net holds `capacity`; a broken net loses a quarter. */
+  get capacity() {
+    return this.netBroken ? Math.floor(this.settings.capacity * 0.75) : this.settings.capacity;
   }
 
   reset() {
+    this.netBroken = false;
+    this.strain = 0;
+    this.spillT = 0;
+    if (this.netMesh) { this.netMesh.rotation.set(0, 0, 0); this.netMesh.position.y = this.cfg.hopperBox.netY; }
     this.score = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;
     this.missedInactive = 0;
     this.exitQueue = [];
     this.fuel.reset();
     // preloaded FUEL ride in the robot as a count; those balls stay switched off
-    this.held = Math.min(this.cfg.preload, this.settings.capacity);
+    this.held = Math.min(this.cfg.preload, this.capacity);
     this.hopperPos = 0;
   }
 
@@ -71,8 +106,28 @@ export class Game {
     this.robot.setHopper(this.hopperPos, hop.outIn);
 
     // ---------------------------------------------------------- intake
-    if (input.held('intake') && this.hopperPos > hop.outIn - 2 && this.held < this.settings.capacity) {
-      this.collect();
+    // The net: a full hopper won't take more. Keep ramming FUEL into it and you can cram in a
+    // couple extra, but hold it there too long and the net tears off.
+    const net = this.cfg.net;
+    let pushing = false;
+    if (input.held('intake') && this.hopperPos > hop.outIn - 2) {
+      const full = this.held >= this.capacity;
+      const overLimit = this.capacity + (this.netBroken ? 0 : net.cramExtra);
+      const waiting = this.collect(full ? Math.min(overLimit, this.capacity + Math.floor(this.strain / net.cramEvery)) : this.capacity);
+      pushing = full && waiting > 0 && !this.netBroken;
+    }
+    if (pushing) {
+      this.strain += dt;
+      if (this.strain >= net.breakAfter) this.breakNet();
+    } else {
+      this.strain = Math.max(0, this.strain - dt * net.recover);
+    }
+    // a torn net drops FUEL when the robot bounces around
+    if (this.netBroken && this.held > 0) {
+      this.spillT -= dt;
+      const v = this.robot.body.angvel();
+      const rough = Math.hypot(v.x, v.z) > 0.6 || this.robot.speed() > 3.5;
+      if (rough && this.spillT <= 0 && this.held > this.capacity * 0.6) { this.spill(1); this.spillT = 0.5; }
     }
 
     // ---------------------------------------------------------- aiming and shooting
@@ -102,7 +157,31 @@ export class Game {
   }
 
   // ------------------------------------------------------------ intake
-  collect() {
+  breakNet() {
+    this.netBroken = true;
+    this.strain = 0;
+    // the net flops over the side and the overfill falls out
+    this.netMesh.rotation.z = 1.2;
+    this.netMesh.position.y -= 0.15;
+    this.spill(Math.max(0, this.held - this.capacity) + 3);
+  }
+
+  /** Drop FUEL out of the top of the robot onto the carpet. */
+  spill(n) {
+    const p = this.robot.body.translation();
+    for (let i = 0; i < n && this.held > 0; i++) {
+      const b = this.fuel.takeSpare();
+      if (!b) return;
+      const a = Math.random() * Math.PI * 2;
+      this.fuel.enable(b, p.x + Math.cos(a) * 0.3, p.y + 0.7, p.z + Math.sin(a) * 0.3,
+        Math.cos(a) * 1.5, 1, Math.sin(a) * 1.5);
+      this.held--;
+    }
+  }
+
+  /** Pull FUEL in the intake's reach into the hopper, up to `limit`. Returns how many were left waiting. */
+  collect(limit) {
+    let waiting = 0;
     const r = this.robot;
     const p = r.body.translation();
     const yaw = r.yaw();
@@ -118,11 +197,12 @@ export class Game {
       const lx = dx * c - dz * s;
       const lz = dx * s + dz * c;
       if (lx > x0 && lx < x1 && Math.abs(lz) < hw) {
+        if (this.held >= limit) { waiting++; continue; }
         this.fuel.disable(b);
         this.held++;
-        if (this.held >= this.settings.capacity) return;
       }
     }
+    return waiting;
   }
 
   // ------------------------------------------------------------ ballistics
@@ -252,6 +332,20 @@ export class Game {
       this.fuel.enable(q.b, h.x + toCenter * (HUB.size / 2 + 0.12), 0.8, h.z + (Math.random() - 0.5) * 0.8,
         toCenter * (1.5 + Math.random()), 0, (Math.random() - 0.5) * 1.2);
     }
+  }
+
+  // ------------------------------------------------------------ FUEL in the hopper
+  drawHeld(time) {
+    const n = Math.min(this.held, this.slots.length);
+    const shake = this.agitateT > 0 ? 0.012 : 0;
+    for (let i = 0; i < n; i++) {
+      const [x, y, z] = this.slots[i];
+      const j = shake ? Math.sin(time * 23 + i * 1.7) * shake : 0;
+      this.heldMatrix.makeTranslation(x + j, y + Math.abs(j), z - j);
+      this.heldMesh.setMatrixAt(i, this.heldMatrix);
+    }
+    this.heldMesh.count = n;
+    this.heldMesh.instanceMatrix.needsUpdate = true;
   }
 
   // ------------------------------------------------------------ aim line

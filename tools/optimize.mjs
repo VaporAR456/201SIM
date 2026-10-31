@@ -9,7 +9,7 @@ const scene = root.listScenes()[0];
 const robot = scene.listChildren()[0];
 
 // 1. drop hardware that is invisible at sim scale
-const junk = /rivet|screw|nut\b|locknut|washer|SHCS|BHCS|ziptie|spacer|collar|bearing|end screw|origin cube|powerpole|tube plug/i;
+const junk = /^Bumper|rivet|screw|nut\b|locknut|washer|SHCS|BHCS|ziptie|spacer|collar|bearing|end screw|origin cube|powerpole|tube plug/i;
 let dropped = 0;
 robot.traverse(n => { if (n.getMesh() && junk.test(n.getName())) { n.setMesh(null); dropped++; } });
 
@@ -20,8 +20,8 @@ for (const sub of robot.listChildren()) {
   const tag = Object.entries(SUB).find(([k]) => sub.getName().startsWith(k))?.[1] ?? 'other';
   sub.traverse(n => {
     if (!n.getMesh()) return;
-    if (/SDS MK5 Molded Wheel/.test(n.getName())) n.setName(`wheel_${wheel++}`);
-    else n.setName('');
+    if (/SDS MK5 Molded Wheel/.test(n.getName())) { n.setName(`wheel_${wheel}`); n.getMesh().setName(`wheel_${wheel++}`); }
+    else { n.setName(''); n.getMesh().setName(''); }
     n.setExtras({ part: tag });
   });
   sub.setName(tag);
@@ -41,7 +41,17 @@ for (const n of scene.listChildren()) {
   const g = groups[tag] ??= (() => { const x = doc.createNode(tag); scene.addChild(x); return x; })();
   g.addChild(n);
 }
-for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { for (const sem of p.listSemantics()) if (sem !== 'POSITION') p.setAttribute(sem, null); }
+for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { for (const sem of p.listSemantics()) if (sem !== 'POSITION' && sem !== 'COLOR_0') p.setAttribute(sem, null); }
+// one shared material + per-vertex color: lets join() merge each group into a single draw call
+const shared = doc.createMaterial('cad').setMetallicFactor(0.25).setRoughnessFactor(0.6);
+for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
+  const c = p.getMaterial()?.getBaseColorFactor() ?? [0.6, 0.6, 0.6, 1];
+  const n = p.getAttribute('POSITION').getCount();
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) col.set([c[0], c[1], c[2]], i * 3);
+  p.setAttribute('COLOR_0', doc.createAccessor().setType('VEC3').setArray(col).setBuffer(p.getAttribute('POSITION').getBuffer()));
+  p.setMaterial(shared);
+}
 const count = (l) => { let t=0, v=0; for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { t += (p.getIndices()?.getCount() ?? 0)/3; v += p.getAttribute('POSITION').getCount(); } console.log(l, 'tris', t, 'verts', v); };
 count('before');
 // OCC writes each B-rep face separately, with near-equal (not identical) seam vertices: snap and merge

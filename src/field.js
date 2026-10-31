@@ -41,12 +41,7 @@ export function buildField(scene, RAPIER, world) {
     return m;
   };
 
-  // ------------------------------------------------------------ carpet and outer area
-  const outer = new THREE.Mesh(new THREE.PlaneGeometry(60, 40), new THREE.MeshStandardMaterial({ color: 0x15181b, roughness: 1 }));
-  outer.rotation.x = -Math.PI / 2;
-  outer.position.y = -0.005;
-  outer.receiveShadow = true;
-  group.add(outer);
+  // ------------------------------------------------------------ carpet (the gym is in arena.js)
 
   const carpet = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_L, FIELD_W), mat.carpet);
   carpet.rotation.x = -Math.PI / 2;

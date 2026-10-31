@@ -28,8 +28,8 @@ The default layout matches MoSim's REBUILT keybinds. Everything can be remapped 
 | Manual shoot | LB | Q |
 | Climb | D-pad down | C |
 | Robot special 1 / 2 / 3 | Y / X / B | V / I / O |
-| Swap camera | Right stick click | Space |
-| Field / robot relative | Left stick click | F |
+| Swap camera (driver station, third person, overhead) | Right stick click | Space |
+| Field / robot relative | D-pad left | F |
 | Reset gyro | D-pad up | G |
 | Pause | Menu | Esc |
 | Restart (hold) | View | Backspace |

@@ -23,9 +23,8 @@ export class Robot {
         .setLinearDamping(0)
         .setAngularDamping(0),
     );
-    // Keep the chassis level: swerve bots don't roll over in normal play, and it keeps the
-    // feel predictable going over the BUMPS.
-    body.setEnabledRotations(false, true, false, true);
+    // Free to pitch and roll so it tilts over the BUMPS; the heavy bumpers and belly keep the
+    // center of mass low so it settles back instead of tipping.
 
     // Bumpers: the main collision shape, rounded so it rides up the BUMP ramps
     const bH = cfg.bumperHeight / 2;
@@ -107,15 +106,18 @@ export class Robot {
     const t = cfg.bumperThickness;
     const h = cfg.bumperHeight;
     const y = cfg.bumperBottom + h / 2;
+    const bumpers = new THREE.Group();
+    this.root.add(bumpers);
+    let target = bumpers;
     const add = (geo, mat, x, yy, z) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, yy, z);
       m.castShadow = true;
       m.receiveShadow = true;
-      g.add(m);
+      target.add(m);
       return m;
     };
-    // bumpers
+    // bumpers (with rounded-looking fabric color) and number plates: shown with or without the CAD
     add(new THREE.BoxGeometry(L, h, t), bumperMat, 0, y, W / 2 - t / 2);
     add(new THREE.BoxGeometry(L, h, t), bumperMat, 0, y, -W / 2 + t / 2);
     add(new THREE.BoxGeometry(t, h, W - 2 * t), bumperMat, L / 2 - t / 2, y, 0);
@@ -127,6 +129,7 @@ export class Robot {
       const p = add(new THREE.PlaneGeometry(0.3, 0.1), plateMat, 0, y, s * (W / 2 + 0.002));
       if (s < 0) p.rotation.y = Math.PI;
     }
+    target = g;
     // belly pan and superstructure block
     add(new THREE.BoxGeometry(cfg.frameLength, 0.02, cfg.frameWidth), frameMat, 0, cfg.bumperBottom + 0.01, 0);
     const supH = cfg.height - cfg.bumperBottom - h;
@@ -183,16 +186,12 @@ export class Robot {
 
     // CAD materials export as fully metallic; give them a plain painted look instead.
     // The web model has no normals (smaller file), so shade it flat.
-    const cache = new Map();
+    // Each part's color is baked into its vertices, so the whole robot is a handful of draw calls.
+    const cadMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.2, roughness: 0.6 });
     object3d.traverse((o) => {
       if (!o.isMesh) return;
-      const key = o.material.color.getHexString();
-      if (!cache.has(key)) {
-        cache.set(key, new THREE.MeshStandardMaterial({
-          color: o.material.color, flatShading: true, metalness: 0.25, roughness: 0.6,
-        }));
-      }
-      o.material = cache.get(key);
+      o.material = o.geometry.attributes.color ? cadMat
+        : new THREE.MeshStandardMaterial({ color: o.material.color, flatShading: true, metalness: 0.2, roughness: 0.6 });
       o.castShadow = true;
       o.receiveShadow = true;
     });
@@ -245,8 +244,11 @@ export class Robot {
   }
 
   yaw() {
+    // heading of the robot's forward (+X) axis, ignoring pitch and roll
     const q = this.body.rotation();
-    return Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.y * q.y + q.z * q.z));
+    const fx = 1 - 2 * (q.y * q.y + q.z * q.z);
+    const fz = 2 * (q.x * q.z - q.w * q.y);
+    return Math.atan2(-fz, fx);
   }
 
   /**
@@ -263,7 +265,7 @@ export class Robot {
     const n = Math.hypot(forward, strafe) || 1;
     const f = (forward / n) * v;
     const s = (strafe / n) * v;
-    const ref = this.fieldRelative ? this.fieldForward : yaw;
+    const ref = !this.fieldRelative ? yaw : this.driveRef ?? this.fieldForward;
     // rotate (forward, right) from the reference heading into world X/Z
     const c = Math.cos(ref), sn = Math.sin(ref);
     let dvx = f * c + s * sn;
@@ -284,7 +286,8 @@ export class Robot {
     omega += Math.max(-cfg.maxAlpha * dt, Math.min(cfg.maxAlpha * dt, eo));
 
     this.body.setLinvel({ x: vx, y: lv.y, z: vz }, true);
-    this.body.setAngvel({ x: 0, y: omega, z: 0 }, true);
+    // keep whatever pitch/roll the BUMPS give it, with a little damping so it settles
+    this.body.setAngvel({ x: av.x * 0.97, y: omega, z: av.z * 0.97 }, true);
     this.cmd = { vx, vz, omega };
   }
 

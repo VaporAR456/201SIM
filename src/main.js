@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HALF_L, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS } from './constants.js';
 import { buildField } from './field.js';
+import { buildArena } from './arena.js';
 import { Robot } from './robot.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
@@ -14,7 +15,7 @@ import { loadSettings, buildSettingsPanel } from './settings.js';
 import { Match, clock } from './match.js';
 import './style.css';
 
-const CAMERAS = ['Driver station', 'Chase', 'Overhead'];
+const CAMERAS = ['Driver station', 'Third person', 'Overhead'];
 const STEP = 1 / 60;
 const MAX_STEPS = 4; // per frame; on a slow computer the sim slows down instead of freezing
 
@@ -33,8 +34,11 @@ const ui = {
   scoreBlue: document.getElementById('score-blue'),
   scoreRed: document.getElementById('score-red'),
   shot: document.getElementById('hud-shot'),
-  clock: document.getElementById('hud-clock'),
-  hubState: document.getElementById('hud-hub'),
+  net: document.getElementById('hud-net'),
+  scorebar: document.getElementById('scorebar'),
+  sbClock: document.getElementById('sb-clock'),
+  sbPhase: document.getElementById('sb-phase'),
+  sbLeft: document.getElementById('sb-left'),
   results: document.getElementById('results'),
   resultsBody: document.getElementById('results-body'),
 };
@@ -45,7 +49,7 @@ async function init() {
   await RAPIER.init();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -53,8 +57,7 @@ async function init() {
   document.getElementById('app').appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0d0f12);
-  scene.fog = new THREE.Fog(0x0d0f12, 30, 60);
+  scene.background = new THREE.Color(0x2a2d31);
 
   const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 200);
   addEventListener('resize', () => {
@@ -63,7 +66,7 @@ async function init() {
     renderer.setSize(innerWidth, innerHeight);
   });
 
-  scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x30302a, 0.9));
+  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6b5a45, 1.1));
   const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(-4, 14, 6);
   sun.castShadow = true;
@@ -74,6 +77,7 @@ async function init() {
 
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = STEP;
+  buildArena(scene);
   buildField(scene, RAPIER, world);
 
   const robot = new Robot(scene, RAPIER, world, ROBOT_201, settings.alliance);
@@ -103,13 +107,24 @@ async function init() {
     game.reset();
     match.reset(settings.mode === 'match');
     ui.results.hidden = true;
+    ui.scorebar?.classList.remove('final');
   };
   restart();
 
   const modeBtns = document.querySelectorAll('[data-mode]');
   modeBtns.forEach((b) => b.addEventListener('click', () => { settings.mode = b.dataset.mode; refreshMenu(); }));
+  // after a match: shrink the score bar back and keep driving in free play, or go again
+  const keepDriving = () => {
+    ui.results.hidden = true;
+    ui.scorebar.classList.remove('final');
+    match.reset(false);
+  };
+  document.getElementById('results-free').addEventListener('click', keepDriving);
   document.getElementById('again').addEventListener('click', () => start());
-  document.getElementById('results-menu').addEventListener('click', () => { ui.results.hidden = true; state = 'menu'; ui.menu.hidden = false; ui.hud.hidden = true; });
+  document.getElementById('results-menu').addEventListener('click', () => {
+    ui.results.hidden = true; ui.scorebar.classList.remove('final'); ui.scorebar.hidden = true;
+    state = 'menu'; ui.menu.hidden = false; ui.hud.hidden = true;
+  });
   const allianceBtns = document.querySelectorAll('[data-alliance]');
   const stationBtns = document.querySelectorAll('[data-station]');
   const refreshMenu = () => {
@@ -120,10 +135,15 @@ async function init() {
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; refreshMenu(); restart(); }));
   refreshMenu();
-  const start = () => { restart(); state = 'play'; ui.menu.hidden = true; ui.pause.hidden = true; ui.hud.hidden = false; };
+  const start = () => {
+    restart();
+    state = 'play';
+    ui.menu.hidden = true; ui.pause.hidden = true; ui.hud.hidden = false;
+    ui.scorebar.hidden = false; ui.scorebar.classList.remove('final');
+  };
   document.getElementById('start').addEventListener('click', start);
   document.getElementById('resume').addEventListener('click', () => { state = 'play'; ui.pause.hidden = true; });
-  document.getElementById('to-menu').addEventListener('click', () => { state = 'menu'; ui.pause.hidden = true; ui.menu.hidden = false; ui.hud.hidden = true; });
+  document.getElementById('to-menu').addEventListener('click', () => { state = 'menu'; ui.pause.hidden = true; ui.menu.hidden = false; ui.hud.hidden = true; ui.scorebar.hidden = true; });
 
   // Controls screen, opened from the main menu or the pause menu
   let controlsFrom = null;
@@ -199,7 +219,7 @@ async function init() {
       if (input.pressed('pause')) { state = 'paused'; ui.pause.hidden = false; }
       if (input.pressed('toggleFieldRel')) robot.fieldRelative = !robot.fieldRelative;
       if (input.pressed('resetGyro')) robot.fieldForward = robot.yaw();
-      if (input.pressed('swapCamera')) camIndex = (camIndex + 1) % CAMERAS.length;
+      if (input.pressed('swapCamera')) { camIndex = (camIndex + 1) % CAMERAS.length; camYaw = robot.yaw(); }
       if (input.pressed('speed1')) robot.speedScale = robot.cfg.speedLevels[0];
       if (input.pressed('speed2')) robot.speedScale = robot.cfg.speedLevels[1];
       if (input.pressed('speed3')) robot.speedScale = robot.cfg.speedLevels[2];
@@ -211,13 +231,18 @@ async function init() {
 
       acc = Math.min(acc + dt, STEP * MAX_STEPS);
       while (acc >= STEP) {
+        // in third person, "forward" on the stick is the way the camera looks
+        robot.driveRef = camIndex === 1 ? camYaw : null;
         const aimTurn = game.update(input, STEP, settings.alliance);
         robot.drive(input.forward, input.strafe, aimTurn ?? input.turn, STEP);
         world.step();
         acc -= STEP;
       }
       if (match.update(dt)) showResults();
-      if (match.over && !ui.results.hidden && input.pressed('confirm')) start();
+      if (match.over && !ui.results.hidden) {
+        if (input.pressed('confirm')) keepDriving();
+        else if (input.pressed('special1')) start();
+      }
       // fell through the world somehow: put it back
       if (robot.position(tmp).y < -1) restart();
     }
@@ -226,6 +251,7 @@ async function init() {
     robot.sync(dt);
     fuel.sync();
     game.drawAim();
+    game.drawHeld(now / 1000);
     updateCamera(dt);
     renderer.render(scene, camera);
 
@@ -239,19 +265,9 @@ async function init() {
         .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'climb', 'special1', 'special2', 'special3'].includes(k) && input.held(k))
         .map(([, b]) => b.label);
       ui.actions.textContent = on.join(' · ');
-      ui.held.textContent = `${game.held} / ${player.capacity}`;
-      if (match.on) {
-        const ph = match.phase();
-        const mine = match.isActive(settings.alliance);
-        ui.clock.textContent = `${ph.name} ${clock(ph.left)}`;
-        ui.hubState.textContent = mine ? 'Your HUB is ACTIVE' : 'Your HUB is INACTIVE: collect and pass';
-        ui.hubState.className = mine ? 'on' : 'off';
-      } else {
-        ui.clock.textContent = 'FREE PRACTICE';
-        ui.hubState.textContent = '';
-      }
-      ui.scoreBlue.textContent = game.score[BLUE];
-      ui.scoreRed.textContent = game.score[RED];
+      ui.held.textContent = `${game.held} / ${game.capacity}`;
+      ui.net.textContent = game.netBroken ? 'NET BROKEN' : game.strain > 1 ? 'NET STRAINING: back off!' : '';
+      updateScorebar();
       const a = game.aim;
       ui.shot.textContent = !a ? '' : a.short ? 'Too far: raise Pass power boost'
         : a.kind === 'pass' ? `Pass ${a.d.toFixed(1)} m · ${a.spd.toFixed(1)} m/s`
@@ -263,11 +279,38 @@ async function init() {
     requestAnimationFrame(frame);
   }
 
+  function updateScorebar() {
+    ui.scoreBlue.textContent = game.score[BLUE];
+    ui.scoreRed.textContent = game.score[RED];
+    document.getElementById('sb-teams-blue').textContent = settings.alliance === BLUE ? '201' : '';
+    document.getElementById('sb-teams-red').textContent = settings.alliance === RED ? '201' : '';
+    for (const a of [BLUE, RED]) {
+      const on = match.isActive(a);
+      const el = document.getElementById(`sb-hub-${a}`);
+      el.textContent = match.on && !match.over ? (on ? 'HUB ACTIVE' : 'HUB INACTIVE') : '';
+      el.className = `sb-hub ${on ? 'on' : 'off'}`;
+      el.parentElement.classList.toggle('dim', match.on && !match.over && !on);
+    }
+    if (!match.on) {
+      ui.sbClock.textContent = 'FREE';
+      ui.sbPhase.textContent = 'PLAY';
+      ui.sbLeft.textContent = '';
+      return;
+    }
+    const ph = match.phase();
+    // the big clock counts down AUTO, then the 2:20 of teleop
+    const left = ph.name === 'AUTO' ? ph.left : Math.max(0, 160 - match.t);
+    ui.sbClock.textContent = match.over ? 'FINAL' : clock(Math.ceil(left));
+    ui.sbPhase.textContent = match.over ? 'MATCH OVER' : ph.shift ? `SHIFT ${ph.shift} / 4` : ph.name === 'TRANSITION' ? 'TRANSITION' : ph.name;
+    ui.sbLeft.textContent = match.over ? '' : `:${String(Math.ceil(ph.left)).padStart(2, '0')}`;
+  }
+
   function showResults() {
     const mine = settings.alliance;
     const pts = match.points[mine];
+    updateScorebar();
+    ui.scorebar.classList.add('final');
     ui.resultsBody.innerHTML =
-      `<div class="big">${pts} <small>points</small></div>` +
       `<table><tr><td>FUEL shot</td><td>${game.shots}</td></tr>` +
       `<tr><td>Scored in an active HUB</td><td>${pts}</td></tr>` +
       `<tr><td>Went in while inactive (no points)</td><td>${game.missedInactive}</td></tr>` +
@@ -276,6 +319,7 @@ async function init() {
     ui.results.hidden = false;
   }
 
+  let camYaw = 0;
   function updateCamera(dt) {
     const p = robot.position(tmp);
     const allianceSign = settings.alliance === BLUE ? -1 : 1;
@@ -288,9 +332,13 @@ async function init() {
       camLook.set(p.x, 0.3, p.z);
       camLook.lerp(new THREE.Vector3(0, 0, ds.z * 0.5), 0.35);
     } else if (mode === 1) {
-      const yaw = robot.yaw();
-      camPos.set(p.x - Math.cos(yaw) * 2.6, 1.6, p.z + Math.sin(yaw) * 2.6);
-      camLook.set(p.x + Math.cos(yaw) * 1.5, 0.3, p.z - Math.sin(yaw) * 1.5);
+      // third person: behind the robot, swinging round smoothly as it turns
+      let d = robot.yaw() - camYaw;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      camYaw += d * (1 - Math.exp(-dt * 2.5));
+      camPos.set(p.x - Math.cos(camYaw) * 3.4, 2.0, p.z + Math.sin(camYaw) * 3.4);
+      camLook.set(p.x + Math.cos(camYaw) * 2.0, 0.4, p.z - Math.sin(camYaw) * 2.0);
     } else {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
@@ -303,7 +351,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun }; // handy for debugging in the console
 }
 
 /** Load the converted team CAD if it exists; keep the placeholder robot otherwise. */

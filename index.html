@@ -52,12 +52,23 @@
       <button id="to-menu">Main menu</button>
     </section>
 
-    <section id="results" class="panel" hidden>
-      <h2>Match over</h2>
+    <div id="scorebar" hidden>
+      <div class="sb-team blue"><div class="sb-name">BLUE</div><div class="sb-teams" id="sb-teams-blue"></div><div class="sb-hub" id="sb-hub-blue"></div></div>
+      <div class="sb-score blue" id="score-blue">0</div>
+      <div class="sb-mid">
+        <div class="sb-clock" id="sb-clock">2:40</div>
+        <div class="sb-sub"><span id="sb-phase">AUTO</span><span id="sb-left">:20</span></div>
+      </div>
+      <div class="sb-score red" id="score-red">0</div>
+      <div class="sb-team red"><div class="sb-name">RED</div><div class="sb-teams" id="sb-teams-red"></div><div class="sb-hub" id="sb-hub-red"></div></div>
+    </div>
+
+    <section id="results" hidden>
       <div id="results-body"></div>
-      <div class="row end">
+      <div class="row center">
+        <button id="results-free" class="primary">Keep driving (free play) <kbd>A</kbd></button>
+        <button id="again">Play again <kbd>Y</kbd></button>
         <button id="results-menu">Main menu</button>
-        <button id="again" class="primary">Play again <kbd>A</kbd></button>
       </div>
     </section>
 
@@ -71,16 +82,13 @@
     </section>
 
     <div id="hud" hidden>
-      <div class="clockbox"><div id="hud-clock"></div><div id="hud-hub"></div></div>
-      <div class="scoreboard">
-        <span class="sb blue">Blue HUB <b id="score-blue">0</b></span>
-        <span class="sb red">Red HUB <b id="score-red">0</b></span>
-      </div>
+
       <div class="hud-left">
         <div id="hud-mode"></div>
         <div id="hud-speed"></div>
         <div id="hud-cam"></div>
         <div>FUEL held <b id="hud-held">0</b></div>
+        <div id="hud-net"></div>
       </div>
       <div id="hud-shot"></div>
       <div id="hud-actions"></div>

@@ -54,11 +54,6 @@ th { color: var(--muted); font-weight: 600; }
 .row.end .primary { margin: 0; }
 #controls td button.reset-one { min-width: 0; font-size: 12px; padding: 4px 8px; color: var(--muted); }
 
-.scoreboard { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
-.sb { background: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; }
-.sb b { font-size: 22px; margin-left: 6px; }
-.sb.blue { border-bottom: 3px solid var(--blue); }
-.sb.red { border-bottom: 3px solid var(--red); }
 #hud-shot { position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%); color: var(--fg); font-size: 13px; background: var(--bg); padding: 4px 10px; border-radius: 6px; }
 #hud-shot:empty { display: none; }
 .settings-list { display: grid; gap: 14px; }
@@ -68,11 +63,37 @@ th { color: var(--muted); font-weight: 600; }
 .setting input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
 .setting small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 
-.clockbox { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; background: var(--bg); padding: 6px 16px; border-radius: 8px; }
-#hud-clock { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
-#hud-hub { font-size: 12px; }
-#hud-hub.on { color: #5ad17a; }
-#hud-hub.off { color: #ff7a6b; }
-#hud-hub:empty { display: none; }
-#results .big { font-size: 48px; font-weight: 800; color: var(--accent); }
-#results .big small { font-size: 16px; color: var(--muted); font-weight: 500; }
+#hud-net { color: #ff7a6b; font-weight: 700; }
+#hud-net:empty { display: none; }
+
+/* broadcast-style score bar */
+#scorebar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch;
+  font-family: system-ui, sans-serif; color: #fff; pointer-events: none; transition: transform .5s ease, top .5s ease; z-index: 5;
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,.45)); }
+#scorebar[hidden] { display: none; }
+.sb-team { width: 190px; padding: 6px 12px; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.sb-team.blue { background: rgba(14, 58, 140, .92); text-align: right; align-items: flex-end; border-radius: 8px 0 0 8px; }
+.sb-team.red { background: rgba(150, 18, 18, .92); text-align: left; align-items: flex-start; border-radius: 0 8px 8px 0; }
+.sb-name { font-size: 26px; font-weight: 800; letter-spacing: 1px; line-height: 1; opacity: .85; }
+.sb-teams { font-size: 14px; font-weight: 600; opacity: .9; }
+.sb-hub { font-size: 11px; font-weight: 700; letter-spacing: .5px; }
+.sb-hub.on { color: #9dffb4; }
+.sb-hub.off { color: #ffd0c8; opacity: .8; }
+.sb-team.dim { filter: saturate(.35) brightness(.7); }
+.sb-score { width: 92px; display: grid; place-items: center; font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sb-score.blue { background: #1f6fff; }
+.sb-score.red { background: #e8322f; }
+.sb-mid { background: #e9ecef; color: #15181b; width: 130px; display: flex; flex-direction: column; }
+.sb-clock { font-size: 36px; font-weight: 800; text-align: center; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.sb-sub { display: flex; background: #c9ced4; font-weight: 800; font-size: 15px; }
+.sb-sub span { flex: 1; text-align: center; padding: 2px 0; }
+.sb-sub span + span { background: #b3b9c0; flex: 0 0 46px; }
+#scorebar.final { top: 22vh; transform: translateX(-50%) scale(1.7); }
+#results { position: fixed; top: calc(22vh + 210px); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px));
+  background: var(--bg); border-radius: 12px; padding: 18px 22px; z-index: 4; }
+#results[hidden] { display: none; }
+#results table { font-size: 15px; }
+#results td:last-child { text-align: right; font-weight: 700; color: var(--accent); }
+.row.center { justify-content: center; margin: 14px 0 0; }
+.row.center .primary { margin: 0; }
+@media (max-width: 900px) { .sb-team { width: 110px; } .sb-name { font-size: 18px; } }
