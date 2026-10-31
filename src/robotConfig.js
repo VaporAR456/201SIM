@@ -20,12 +20,13 @@ export const ROBOT_201 = {
   // deployed intake reaches this far past the front bumper (CAD: 8.1in)
   intakeReach: 0.207,
   intakeWidth: 0.72,
-  mass: 60, // kg, PLACEHOLDER: from the MoSim mod, which the CAD lead says is not accurate
+  // near the 115 lb robot limit + 13 lb bumpers + ~12.5 lb battery = ~138 lb
+  mass: 63, // kg
 
   // Swerve
-  // Kraken X60 (6000 rpm free) through 6:1 on a 4in wheel = 5.32 m/s free; ~90% of that on carpet
-  driveRatio: 6,
-  maxSpeed: 4.8, // m/s, PLACEHOLDER: from the MoSim mod, waiting on real numbers
+  // MK5n R3 ("L3"): Kraken X60 (6000 rpm free) through 5.27:1 on a 4in wheel = 6.06 m/s free; ~90% on carpet
+  driveRatio: 5.27,
+  maxSpeed: 5.45, // m/s
   maxAccel: 9.0, // m/s^2, traction-limited (wheel friction 1.1 x g, minus losses)
   maxOmega: 2 * Math.PI * 1.6, // rad/s top turn rate
   maxAlpha: 30, // rad/s^2 turn acceleration
