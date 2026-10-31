@@ -87,3 +87,11 @@ export const COLORS = {
   steel: 0x9aa3ab,
   poly: 0xcfe8ff,
 };
+
+// Rapier collision groups: (membership << 16) | filter
+export const GROUP = {
+  TERRAIN: 0x0002, // BUMPS
+  INTAKE: 0x0004,
+  FUEL: 0x0008,
+};
+export const groups = (member, filter = 0xffff) => (member << 16) | filter;

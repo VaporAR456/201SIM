@@ -53,3 +53,17 @@ th { color: var(--muted); font-weight: 600; }
 .row.end { justify-content: flex-end; margin: 14px 0 0; }
 .row.end .primary { margin: 0; }
 #controls td button.reset-one { min-width: 0; font-size: 12px; padding: 4px 8px; color: var(--muted); }
+
+.scoreboard { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+.sb { background: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; }
+.sb b { font-size: 22px; margin-left: 6px; }
+.sb.blue { border-bottom: 3px solid var(--blue); }
+.sb.red { border-bottom: 3px solid var(--red); }
+#hud-shot { position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%); color: var(--fg); font-size: 13px; background: var(--bg); padding: 4px 10px; border-radius: 6px; }
+#hud-shot:empty { display: none; }
+.settings-list { display: grid; gap: 14px; }
+.setting { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.setting .name { font-weight: 600; }
+.setting .val { color: var(--accent); font-variant-numeric: tabular-nums; }
+.setting input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.setting small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }

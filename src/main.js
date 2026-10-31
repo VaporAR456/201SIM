@@ -8,10 +8,14 @@ import { Robot } from './robot.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
+import { Fuel } from './fuel.js';
+import { Game } from './game.js';
+import { loadSettings, buildSettingsPanel } from './settings.js';
 import './style.css';
 
 const CAMERAS = ['Driver station', 'Chase', 'Overhead'];
-const STEP = 1 / 120;
+const STEP = 1 / 60;
+const MAX_STEPS = 4; // per frame; on a slow computer the sim slows down instead of freezing
 
 const ui = {
   menu: document.getElementById('menu'),
@@ -24,6 +28,10 @@ const ui = {
   actions: document.getElementById('hud-actions'),
   fps: document.getElementById('hud-fps'),
   restartBar: document.getElementById('restart-bar'),
+  held: document.getElementById('hud-held'),
+  scoreBlue: document.getElementById('score-blue'),
+  scoreRed: document.getElementById('score-red'),
+  shot: document.getElementById('hud-shot'),
 };
 
 const settings = { alliance: BLUE, station: 1 };
@@ -65,6 +73,9 @@ async function init() {
 
   const robot = new Robot(scene, RAPIER, world, ROBOT_201, settings.alliance);
   loadCad(robot);
+  const fuel = new Fuel(scene, RAPIER, world);
+  const player = loadSettings();
+  const game = new Game(scene, robot, fuel, player);
   const input = new Input();
 
   // ------------------------------------------------------------ menu
@@ -82,6 +93,7 @@ async function init() {
     robot.reset(p.x, p.z, p.yaw);
     robot.fieldForward = settings.alliance === BLUE ? 0 : Math.PI;
     robot.bumperMat.color.set(settings.alliance === BLUE ? 0x1f6fff : 0xe8322f);
+    game.reset();
   };
   restart();
 
@@ -111,6 +123,25 @@ async function init() {
     controls.show();
   };
   document.getElementById('open-controls').addEventListener('click', openControls);
+
+  // Settings screen (shooter power, fire rate, hopper size)
+  const settingsPanel = document.getElementById('settings');
+  let settingsFrom = null;
+  buildSettingsPanel(settingsPanel, player);
+  const openSettings = () => {
+    settingsFrom = state;
+    ui.menu.hidden = true;
+    ui.pause.hidden = true;
+    settingsPanel.hidden = false;
+  };
+  const closeSettings = () => {
+    settingsPanel.hidden = true;
+    (settingsFrom === 'paused' ? ui.pause : ui.menu).hidden = false;
+  };
+  document.getElementById('open-settings').addEventListener('click', openSettings);
+  document.getElementById('pause-settings').addEventListener('click', openSettings);
+  settingsPanel.querySelector('.settings-close').addEventListener('click', closeSettings);
+  addEventListener('keydown', (e) => { if (e.code === 'Escape' && !settingsPanel.hidden) { e.stopPropagation(); closeSettings(); } }, true);
   document.getElementById('pause-controls').addEventListener('click', openControls);
 
   // Menu navigation reads the controller's standard buttons directly, so it works even if the
@@ -137,6 +168,8 @@ async function init() {
     const pad = input.activePad();
     if (controls.open) {
       controls.update();
+    } else if (!settingsPanel.hidden) {
+      if (navPressed(pad, PAD.B)) closeSettings();
     } else if (state === 'menu') {
       if (input.pressed('confirm')) start();
       // controller: D-pad picks station, X / B pick alliance, Y opens Controls
@@ -162,9 +195,10 @@ async function init() {
       } else restartHeld = 0;
       ui.restartBar.style.width = `${Math.max(0, restartHeld / 0.8) * 100}%`;
 
-      acc += dt;
+      acc = Math.min(acc + dt, STEP * MAX_STEPS);
       while (acc >= STEP) {
-        robot.drive(input.forward, input.strafe, input.turn, STEP);
+        const aimTurn = game.update(input, STEP, settings.alliance);
+        robot.drive(input.forward, input.strafe, aimTurn ?? input.turn, STEP);
         world.step();
         acc -= STEP;
       }
@@ -174,6 +208,8 @@ async function init() {
 
     navPrev = pad ? pad.buttons.map((b) => b.value) : [];
     robot.sync(dt);
+    fuel.sync();
+    game.drawAim();
     updateCamera(dt);
     renderer.render(scene, camera);
 
@@ -187,6 +223,14 @@ async function init() {
         .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'climb', 'special1', 'special2', 'special3'].includes(k) && input.held(k))
         .map(([, b]) => b.label);
       ui.actions.textContent = on.join(' · ');
+      ui.held.textContent = `${game.held} / ${player.capacity}`;
+      ui.scoreBlue.textContent = game.score[BLUE];
+      ui.scoreRed.textContent = game.score[RED];
+      const a = game.aim;
+      ui.shot.textContent = !a ? '' : a.short ? 'Too far: raise Pass power boost'
+        : a.kind === 'pass' ? `Pass ${a.d.toFixed(1)} m · ${a.spd.toFixed(1)} m/s`
+        : a.kind === 'shot' ? `HUB ${a.d.toFixed(1)} m · ${a.spd.toFixed(1)} m/s${a.ready ? '' : ' · aiming'}`
+        : 'Manual shot';
     }
     fpsT += dt; fpsN++;
     if (fpsT > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsT)} fps`; fpsT = 0; fpsN = 0; }
@@ -220,7 +264,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player }; // handy for debugging in the console
 }
 
 /** Load the converted team CAD if it exists; keep the placeholder robot otherwise. */

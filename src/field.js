@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   IN, FIELD_L, FIELD_W, HALF_L, HALF_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH,
-  WALL, HUB, BUMP, TRENCH, TOWER, DEPOT, OUTPOST, COLORS,
+  WALL, HUB, BUMP, TRENCH, TOWER, DEPOT, OUTPOST, COLORS, GROUP, groups,
 } from './constants.js';
 
 export function buildField(scene, RAPIER, world) {
@@ -110,7 +110,16 @@ export function buildField(scene, RAPIER, world) {
       rim.rotation.z = Math.PI / 6;
       rim.position.set(p.x, HUB.rim, p.z);
       group.add(rim);
-      collider(RAPIER.ColliderDesc.cylinder(funnelH / 2, rimR * 0.95), p.x, boxH + funnelH / 2, p.z);
+      // funnel walls: six thin panels at the rim, open on top so FUEL can drop in and score
+      const apo = HUB.openingAcross / 2;
+      const edge = rimR; // a regular hexagon's side equals its circumradius
+      for (let k = 0; k < 6; k++) {
+        const th = (k * Math.PI) / 3;
+        collider(
+          RAPIER.ColliderDesc.cuboid(edge / 2 + 0.02, funnelH / 2, 0.01),
+          p.x + apo * Math.sin(th), boxH + funnelH / 2, p.z + apo * Math.cos(th), th,
+        );
+      }
     }
 
     // BUMPS either side of the HUB: ramps robots drive over
@@ -188,7 +197,8 @@ function addBump(group, collider, RAPIER, x, z, material) {
     verts.push(px, py, -w, px, py, w);
   }
   const pts = new Float32Array(verts);
-  const desc = RAPIER.ColliderDesc.convexHull(pts);
+  // BUMPS are their own group so the low intake can ride over them
+  const desc = RAPIER.ColliderDesc.convexHull(pts).setCollisionGroups(groups(GROUP.TERRAIN));
   collider(desc, x, 0, z);
 
   const shape = new THREE.Shape();

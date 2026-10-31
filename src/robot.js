@@ -1,6 +1,6 @@
 // 201's robot: a swerve drive on a Rapier rigid body, with a three.js model.
 import * as THREE from 'three';
-import { BLUE } from './constants.js';
+import { BLUE, GROUP, groups } from './constants.js';
 
 const tmp = new THREE.Vector3();
 
@@ -55,8 +55,12 @@ export class Robot {
     // Deployed intake sticking out past the front bumper
     if (cfg.intakeReach > 0) {
       const ih = 0.06;
-      world.createCollider(
+      this.intakeX = L + cfg.intakeReach / 2;
+      this.intakeY = cfg.bumperBottom + ih;
+      this.intakeCollider = world.createCollider(
         RAPIER.ColliderDesc.cuboid(cfg.intakeReach / 2, ih, cfg.intakeWidth / 2)
+          // the intake doesn't catch on BUMPS, and lets FUEL through to be collected
+          .setCollisionGroups(groups(GROUP.INTAKE, 0xffff & ~GROUP.TERRAIN & ~GROUP.FUEL))
           .setTranslation(L + cfg.intakeReach / 2, cfg.bumperBottom + ih, 0)
           .setFriction(0)
           .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
@@ -150,6 +154,24 @@ export class Robot {
     return g;
   }
 
+  /**
+   * Move the expanding hopper (and the intake on its end). pos and out are inches; `out` is the
+   * fully-out position shown in the CAD.
+   */
+  setHopper(pos, out) {
+    const off = (pos - out) * 0.0254;
+    if (this.intakeNode) this.intakeNode.position.x = this.intakeBase + off;
+    if (this.intakeCollider) {
+      this.intakeCollider.setTranslationWrtParent({ x: this.intakeX + off, y: this.intakeY, z: 0 });
+      this.intakeCollider.setEnabled(pos > out / 2);
+    }
+  }
+
+  /** Spin the spindexer while it feeds the shooter. */
+  spinIndexer(dt) {
+    if (this.spindexerPivot) this.spindexerPivot.rotation.y += dt * 9;
+  }
+
   /** Swap the placeholder body for the converted team CAD, keeping the swerve module visuals. */
   setCadModel(object3d) {
     if (this.cadModel) this.root.remove(this.cadModel);
@@ -196,6 +218,20 @@ export class Robot {
       cadModules[best] = pivot;
     }
     this.cadModules = cadModules;
+
+    // Moving parts: the intake slides with the expanding hopper; the spindexer spins
+    const intake = object3d.getObjectByName('intake');
+    if (intake) { this.intakeNode = intake; this.intakeBase = intake.position.x; }
+    const spx = object3d.getObjectByName('spindexer');
+    if (spx) {
+      const c = new THREE.Box3().setFromObject(spx).getCenter(new THREE.Vector3());
+      this.root.worldToLocal(c);
+      const pivot = new THREE.Group();
+      pivot.position.set(c.x, 0, c.z);
+      this.root.add(pivot);
+      pivot.attach(spx);
+      this.spindexerPivot = pivot;
+    }
     this.placeholder.visible = false;
   }
 

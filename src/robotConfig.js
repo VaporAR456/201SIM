@@ -38,6 +38,23 @@ export const ROBOT_201 = {
   // 12in out (held 1s) and 4in in (held 0.375s) at up to 30 in/s, stirring FUEL into the indexer
   hopper: { outIn: 12, inIn: -4, outHold: 1.0, inHold: 0.375, maxSpeedInPerS: 30 },
 
+  // Shooter. facing: -1 shoots out the back of the robot (where the Kicker & Shooter sits in
+  // the CAD), +1 out the front. Angles are hood angles above horizontal.
+  preload: 8,
+  shooter: {
+    facing: -1,
+    exit: [-0.22, 0.66, 0], // where FUEL leaves the shooter, robot frame (x forward, y up)
+    maxExitSpeed: 9.5, // m/s at normal power; passing multiplies this by the Pass power boost
+    angleNear: 72, nearDist: 1.5, // steep lob up close...
+    angleFar: 52, farDist: 6, // ...flatter from far away
+    aimHeight: 1.95, // m, center of the HUB opening (rim is 72in)
+    manualDist: 3.0, // m, manual shoot is a fixed shot tuned for this distance
+    passAngle: 45,
+    passLandFx: 2.4, // m from your alliance wall where passes aim to land
+    spreadDeg: 1.0,
+    speedNoise: 0.02,
+  },
+
   // Drive speed presets (fraction of top speed) for the Drive speed 1 / 2 / 3 buttons
   speedLevels: [0.35, 0.7, 1],
 };

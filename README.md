@@ -3,8 +3,11 @@
 A driver-practice simulator for FRC Team 201's 2026 REBUILT robot. It runs in the browser
 with nothing to install, and plays with an Xbox, PlayStation or generic USB controller.
 
-**Status:** milestone 1. You can drive a swerve robot around the REBUILT field (HUBs, BUMPs,
-TRENCHES, TOWERS) from the driver station view. FUEL, intake, shooting and scoring come next.
+**Status:** drive 201's robot around the REBUILT field, pick up FUEL, and shoot or pass it.
+Auto shoot aims at your HUB (shoot on the move included), auto pass lobs FUEL back to your
+alliance zone with a stronger "pass power boost", and the expanding hopper agitates while
+shooting like the real robot. Shooter power, pass boost, fire rate and hopper size are in
+**Settings**. Match timer, HUB shifts and climbing come next.
 
 ## Play
 

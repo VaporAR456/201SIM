@@ -25,6 +25,7 @@
       </div>
       <button id="start" class="primary">Start practice <kbd>A</kbd> / <kbd>Enter</kbd></button>
       <button id="open-controls">Controls <kbd>Y</kbd></button>
+      <button id="open-settings">Settings</button>
       <p id="pad-status"></p>
     </section>
 
@@ -42,15 +43,31 @@
       <h2>Paused</h2>
       <button id="resume" class="primary">Resume <kbd>Menu</kbd> / <kbd>Esc</kbd></button>
       <button id="pause-controls">Controls <kbd>Y</kbd></button>
+      <button id="pause-settings">Settings</button>
       <button id="to-menu">Main menu</button>
     </section>
 
+    <section id="settings" class="panel wide" hidden>
+      <h2>Settings</h2>
+      <div class="settings-list"></div>
+      <div class="row end">
+        <button class="settings-reset">Reset to defaults</button>
+        <button class="settings-close primary">Done <kbd>B</kbd> / <kbd>Esc</kbd></button>
+      </div>
+    </section>
+
     <div id="hud" hidden>
+      <div class="scoreboard">
+        <span class="sb blue">Blue HUB <b id="score-blue">0</b></span>
+        <span class="sb red">Red HUB <b id="score-red">0</b></span>
+      </div>
       <div class="hud-left">
         <div id="hud-mode"></div>
         <div id="hud-speed"></div>
         <div id="hud-cam"></div>
+        <div>FUEL held <b id="hud-held">0</b></div>
       </div>
+      <div id="hud-shot"></div>
       <div id="hud-actions"></div>
       <div id="hud-fps"></div>
       <div id="restart"><div id="restart-bar"></div></div>
