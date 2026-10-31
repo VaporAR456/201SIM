@@ -38,6 +38,8 @@ export class Game {
 
   reset() {
     this.score = { [BLUE]: 0, [RED]: 0 };
+    this.shots = 0;
+    this.missedInactive = 0;
     this.exitQueue = [];
     this.fuel.reset();
     // preloaded FUEL ride in the robot as a count; those balls stay switched off
@@ -217,6 +219,7 @@ export class Game {
     const h = spd * Math.cos(thN);
     this.fuel.enable(b, e.x, e.y, e.z, ux * h + v.x, spd * Math.sin(thN), uz * h + v.z);
     this.held--;
+    this.shots = (this.shots || 0) + 1;
   }
 
   // ------------------------------------------------------------ scoring
@@ -231,7 +234,8 @@ export class Game {
         const dx = q.x - h.x, dz = q.z - h.z;
         // inside the hexagon (checked as its inscribed circle plus the six corners' margin)
         if (Math.hypot(dx, dz) < apo) {
-          this.score[al]++;
+          if (this.match ? this.match.scored(al) : true) this.score[al]++;
+          else this.missedInactive = (this.missedInactive || 0) + 1;
           this.fuel.disable(b);
           this.exitQueue.push({ b, al, t: 0.6 });
         }

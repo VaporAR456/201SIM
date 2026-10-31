@@ -54,7 +54,7 @@ th { color: var(--muted); font-weight: 600; }
 .row.end .primary { margin: 0; }
 #controls td button.reset-one { min-width: 0; font-size: 12px; padding: 4px 8px; color: var(--muted); }
 
-.scoreboard { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
+.scoreboard { position: absolute; top: 74px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; }
 .sb { background: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 14px; }
 .sb b { font-size: 22px; margin-left: 6px; }
 .sb.blue { border-bottom: 3px solid var(--blue); }
@@ -67,3 +67,12 @@ th { color: var(--muted); font-weight: 600; }
 .setting .val { color: var(--accent); font-variant-numeric: tabular-nums; }
 .setting input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
 .setting small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+
+.clockbox { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; background: var(--bg); padding: 6px 16px; border-radius: 8px; }
+#hud-clock { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+#hud-hub { font-size: 12px; }
+#hud-hub.on { color: #5ad17a; }
+#hud-hub.off { color: #ff7a6b; }
+#hud-hub:empty { display: none; }
+#results .big { font-size: 48px; font-weight: 800; color: var(--accent); }
+#results .big small { font-size: 16px; color: var(--muted); font-weight: 500; }

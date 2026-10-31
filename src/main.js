@@ -11,6 +11,7 @@ import { ROBOT_201 } from './robotConfig.js';
 import { Fuel } from './fuel.js';
 import { Game } from './game.js';
 import { loadSettings, buildSettingsPanel } from './settings.js';
+import { Match, clock } from './match.js';
 import './style.css';
 
 const CAMERAS = ['Driver station', 'Chase', 'Overhead'];
@@ -32,9 +33,13 @@ const ui = {
   scoreBlue: document.getElementById('score-blue'),
   scoreRed: document.getElementById('score-red'),
   shot: document.getElementById('hud-shot'),
+  clock: document.getElementById('hud-clock'),
+  hubState: document.getElementById('hud-hub'),
+  results: document.getElementById('results'),
+  resultsBody: document.getElementById('results-body'),
 };
 
-const settings = { alliance: BLUE, station: 1 };
+const settings = { alliance: BLUE, station: 1, mode: 'match' };
 
 async function init() {
   await RAPIER.init();
@@ -76,6 +81,8 @@ async function init() {
   const fuel = new Fuel(scene, RAPIER, world);
   const player = loadSettings();
   const game = new Game(scene, robot, fuel, player);
+  const match = new Match();
+  game.match = match;
   const input = new Input();
 
   // ------------------------------------------------------------ menu
@@ -94,14 +101,21 @@ async function init() {
     robot.fieldForward = settings.alliance === BLUE ? 0 : Math.PI;
     robot.bumperMat.color.set(settings.alliance === BLUE ? 0x1f6fff : 0xe8322f);
     game.reset();
+    match.reset(settings.mode === 'match');
+    ui.results.hidden = true;
   };
   restart();
 
+  const modeBtns = document.querySelectorAll('[data-mode]');
+  modeBtns.forEach((b) => b.addEventListener('click', () => { settings.mode = b.dataset.mode; refreshMenu(); }));
+  document.getElementById('again').addEventListener('click', () => start());
+  document.getElementById('results-menu').addEventListener('click', () => { ui.results.hidden = true; state = 'menu'; ui.menu.hidden = false; ui.hud.hidden = true; });
   const allianceBtns = document.querySelectorAll('[data-alliance]');
   const stationBtns = document.querySelectorAll('[data-station]');
   const refreshMenu = () => {
     allianceBtns.forEach((b) => b.classList.toggle('on', b.dataset.alliance === settings.alliance));
     stationBtns.forEach((b) => b.classList.toggle('on', +b.dataset.station === settings.station));
+    modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; refreshMenu(); restart(); }));
@@ -202,6 +216,8 @@ async function init() {
         world.step();
         acc -= STEP;
       }
+      if (match.update(dt)) showResults();
+      if (match.over && !ui.results.hidden && input.pressed('confirm')) start();
       // fell through the world somehow: put it back
       if (robot.position(tmp).y < -1) restart();
     }
@@ -224,6 +240,16 @@ async function init() {
         .map(([, b]) => b.label);
       ui.actions.textContent = on.join(' · ');
       ui.held.textContent = `${game.held} / ${player.capacity}`;
+      if (match.on) {
+        const ph = match.phase();
+        const mine = match.isActive(settings.alliance);
+        ui.clock.textContent = `${ph.name} ${clock(ph.left)}`;
+        ui.hubState.textContent = mine ? 'Your HUB is ACTIVE' : 'Your HUB is INACTIVE: collect and pass';
+        ui.hubState.className = mine ? 'on' : 'off';
+      } else {
+        ui.clock.textContent = 'FREE PRACTICE';
+        ui.hubState.textContent = '';
+      }
       ui.scoreBlue.textContent = game.score[BLUE];
       ui.scoreRed.textContent = game.score[RED];
       const a = game.aim;
@@ -235,6 +261,19 @@ async function init() {
     fpsT += dt; fpsN++;
     if (fpsT > 0.5) { ui.fps.textContent = `${Math.round(fpsN / fpsT)} fps`; fpsT = 0; fpsN = 0; }
     requestAnimationFrame(frame);
+  }
+
+  function showResults() {
+    const mine = settings.alliance;
+    const pts = match.points[mine];
+    ui.resultsBody.innerHTML =
+      `<div class="big">${pts} <small>points</small></div>` +
+      `<table><tr><td>FUEL shot</td><td>${game.shots}</td></tr>` +
+      `<tr><td>Scored in an active HUB</td><td>${pts}</td></tr>` +
+      `<tr><td>Went in while inactive (no points)</td><td>${game.missedInactive}</td></tr>` +
+      `<tr><td>Accuracy</td><td>${game.shots ? Math.round(((pts + game.missedInactive) / game.shots) * 100) : 0}%</td></tr>` +
+      `<tr><td>Scored in AUTO</td><td>${match.autoFuel[mine]}</td></tr></table>`;
+    ui.results.hidden = false;
   }
 
   function updateCamera(dt) {

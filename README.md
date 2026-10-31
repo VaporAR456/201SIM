@@ -7,7 +7,7 @@ with nothing to install, and plays with an Xbox, PlayStation or generic USB cont
 Auto shoot aims at your HUB (shoot on the move included), auto pass lobs FUEL back to your
 alliance zone with a stronger "pass power boost", and the expanding hopper agitates while
 shooting like the real robot. Shooter power, pass boost, fire rate and hopper size are in
-**Settings**. Match timer, HUB shifts and climbing come next.
+**Settings**. Match mode runs the real 2:40 REBUILT clock (AUTO, TRANSITION, four HUB SHIFTS, END GAME) and only counts FUEL in your active HUB. Climbing comes next.
 
 ## Play
 

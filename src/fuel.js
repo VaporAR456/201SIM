@@ -12,7 +12,7 @@ export class Fuel {
     this.RAPIER = RAPIER;
     this.world = world;
     this.balls = [];
-    const geo = new THREE.SphereGeometry(FUEL_RADIUS, 14, 10);
+    const geo = new THREE.SphereGeometry(FUEL_RADIUS, 12, 8);
     const mat = new THREE.MeshStandardMaterial({ color: 0xffd21f, roughness: 0.75 });
     this.mesh = new THREE.InstancedMesh(geo, mat, TOTAL);
     this.mesh.castShadow = true;
