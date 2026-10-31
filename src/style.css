@@ -42,3 +42,14 @@ th { color: var(--muted); font-weight: 600; }
 #hud-fps { position: absolute; right: 16px; top: 16px; color: var(--muted); font-size: 12px; }
 #restart { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; }
 #restart-bar { height: 100%; width: 0; background: var(--accent); }
+
+.panel.wide { width: min(680px, calc(100vw - 32px)); }
+.remap-status { color: var(--accent); font-size: 14px; min-height: 20px; margin: 0 0 8px; }
+.remap-scroll { max-height: calc(100vh - 260px); overflow: auto; }
+#controls td button { min-width: 150px; text-align: left; padding: 5px 10px; }
+#controls td.dim { color: var(--muted); }
+#controls tr.focus td { background: rgba(255, 176, 0, 0.08); }
+#controls button.listening { border-color: var(--accent); color: var(--accent); }
+.row.end { justify-content: flex-end; margin: 14px 0 0; }
+.row.end .primary { margin: 0; }
+#controls td button.reset-one { min-width: 0; font-size: 12px; padding: 4px 8px; color: var(--muted); }

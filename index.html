@@ -24,16 +24,24 @@
         <span class="hint">D-pad ← →</span>
       </div>
       <button id="start" class="primary">Start practice <kbd>A</kbd> / <kbd>Enter</kbd></button>
+      <button id="open-controls">Controls <kbd>Y</kbd></button>
       <p id="pad-status"></p>
-      <details>
-        <summary>Controls</summary>
-        <table id="controls-table"></table>
-      </details>
+    </section>
+
+    <section id="controls" class="panel wide" hidden>
+      <h2>Controls</h2>
+      <p class="remap-status"></p>
+      <div class="remap-scroll"><table></table></div>
+      <div class="row end">
+        <button class="remap-reset">Reset to defaults</button>
+        <button class="remap-close primary">Done <kbd>B</kbd> / <kbd>Esc</kbd></button>
+      </div>
     </section>
 
     <section id="pause" class="panel" hidden>
       <h2>Paused</h2>
       <button id="resume" class="primary">Resume <kbd>Menu</kbd> / <kbd>Esc</kbd></button>
+      <button id="pause-controls">Controls <kbd>Y</kbd></button>
       <button id="to-menu">Main menu</button>
     </section>
 

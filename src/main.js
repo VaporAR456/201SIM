@@ -5,7 +5,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { HALF_L, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS } from './constants.js';
 import { buildField } from './field.js';
 import { Robot } from './robot.js';
-import { Input, BINDINGS, PAD } from './input.js';
+import { Input, ACTIONS, PAD } from './input.js';
+import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
 import './style.css';
 
@@ -23,7 +24,6 @@ const ui = {
   actions: document.getElementById('hud-actions'),
   fps: document.getElementById('hud-fps'),
   restartBar: document.getElementById('restart-bar'),
-  controls: document.getElementById('controls-table'),
 };
 
 const settings = { alliance: BLUE, station: 1 };
@@ -98,7 +98,25 @@ async function init() {
   document.getElementById('start').addEventListener('click', start);
   document.getElementById('resume').addEventListener('click', () => { state = 'play'; ui.pause.hidden = true; });
   document.getElementById('to-menu').addEventListener('click', () => { state = 'menu'; ui.pause.hidden = true; ui.menu.hidden = false; ui.hud.hidden = true; });
-  renderControlsTable();
+
+  // Controls screen, opened from the main menu or the pause menu
+  let controlsFrom = null;
+  const controls = new ControlsScreen(input, document.getElementById('controls'), () => {
+    (controlsFrom === 'paused' ? ui.pause : ui.menu).hidden = false;
+  });
+  const openControls = () => {
+    controlsFrom = state;
+    ui.menu.hidden = true;
+    ui.pause.hidden = true;
+    controls.show();
+  };
+  document.getElementById('open-controls').addEventListener('click', openControls);
+  document.getElementById('pause-controls').addEventListener('click', openControls);
+
+  // Menu navigation reads the controller's standard buttons directly, so it works even if the
+  // in-game bindings were remapped
+  let navPrev = [];
+  const navPressed = (pad, i) => !!pad && (pad.buttons[i]?.value ?? 0) > 0.5 && !(navPrev[i] > 0.5);
 
   // ------------------------------------------------------------ loop
   let acc = 0;
@@ -116,24 +134,28 @@ async function init() {
     ui.pad.textContent = input.padName ? `Controller: ${input.padName.replace(/\(.*?\)/g, '').trim()}` : 'No controller found. Press any button on it, or use the keyboard.';
     ui.pad.classList.toggle('ok', !!input.padName);
 
-    if (state === 'menu') {
+    const pad = input.activePad();
+    if (controls.open) {
+      controls.update();
+    } else if (state === 'menu') {
       if (input.pressed('confirm')) start();
-      // menu navigation on the controller: D-pad picks station, B/X pick alliance
-      const pad = input.activePad();
-      if (pad) {
-        if (input.pressed('camPrev')) { settings.station = Math.max(0, settings.station - 1); refreshMenu(); restart(); }
-        if (input.pressed('camNext')) { settings.station = Math.min(2, settings.station + 1); refreshMenu(); restart(); }
-        if (pad.buttons[PAD.X]?.pressed && settings.alliance !== BLUE) { settings.alliance = BLUE; refreshMenu(); restart(); }
-        if (pad.buttons[PAD.B]?.pressed && settings.alliance !== RED) { settings.alliance = RED; refreshMenu(); restart(); }
-      }
+      // controller: D-pad picks station, X / B pick alliance, Y opens Controls
+      if (navPressed(pad, PAD.LEFT)) { settings.station = Math.max(0, settings.station - 1); refreshMenu(); restart(); }
+      if (navPressed(pad, PAD.RIGHT)) { settings.station = Math.min(2, settings.station + 1); refreshMenu(); restart(); }
+      if (navPressed(pad, PAD.X)) { settings.alliance = BLUE; refreshMenu(); restart(); }
+      if (navPressed(pad, PAD.B)) { settings.alliance = RED; refreshMenu(); restart(); }
+      if (navPressed(pad, PAD.Y)) openControls();
     } else if (state === 'paused') {
       if (input.pressed('pause') || input.pressed('confirm')) { state = 'play'; ui.pause.hidden = true; }
+      else if (navPressed(pad, PAD.Y)) openControls();
     } else if (state === 'play') {
       if (input.pressed('pause')) { state = 'paused'; ui.pause.hidden = false; }
       if (input.pressed('toggleFieldRel')) robot.fieldRelative = !robot.fieldRelative;
       if (input.pressed('resetGyro')) robot.fieldForward = robot.yaw();
-      if (input.pressed('camNext')) camIndex = (camIndex + 1) % CAMERAS.length;
-      if (input.pressed('camPrev')) camIndex = (camIndex + CAMERAS.length - 1) % CAMERAS.length;
+      if (input.pressed('swapCamera')) camIndex = (camIndex + 1) % CAMERAS.length;
+      if (input.pressed('speed1')) robot.speedScale = robot.cfg.speedLevels[0];
+      if (input.pressed('speed2')) robot.speedScale = robot.cfg.speedLevels[1];
+      if (input.pressed('speed3')) robot.speedScale = robot.cfg.speedLevels[2];
       if (input.held('restart')) {
         restartHeld += dt;
         if (restartHeld > 0.8) { restart(); restartHeld = -1; }
@@ -142,7 +164,7 @@ async function init() {
 
       acc += dt;
       while (acc >= STEP) {
-        robot.drive(input.forward, input.strafe, input.turn, input.held('slow'), STEP);
+        robot.drive(input.forward, input.strafe, input.turn, STEP);
         world.step();
         acc -= STEP;
       }
@@ -150,6 +172,7 @@ async function init() {
       if (robot.position(tmp).y < -1) restart();
     }
 
+    navPrev = pad ? pad.buttons.map((b) => b.value) : [];
     robot.sync(dt);
     updateCamera(dt);
     renderer.render(scene, camera);
@@ -158,9 +181,10 @@ async function init() {
     if (state === 'play') {
       ui.mode.textContent = robot.fieldRelative ? 'Field relative' : 'Robot relative';
       ui.speed.textContent = `${robot.speed().toFixed(1)} m/s`;
+      ui.mode.textContent += ` · speed ${robot.cfg.speedLevels.indexOf(robot.speedScale) + 1}`;
       ui.cam.textContent = CAMERAS[camIndex];
-      const on = Object.entries(BINDINGS)
-        .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'special', 'slow'].includes(k) && input.held(k))
+      const on = Object.entries(ACTIONS)
+        .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'climb', 'special1', 'special2', 'special3'].includes(k) && input.held(k))
         .map(([, b]) => b.label);
       ui.actions.textContent = on.join(' · ');
     }
@@ -197,24 +221,6 @@ async function init() {
 
   requestAnimationFrame(frame);
   window.__sim = { robot, world, input, settings }; // handy for debugging in the console
-}
-
-function renderControlsTable() {
-  const padNames = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'Left stick click', 'Right stick click', 'D-pad up', 'D-pad down', 'D-pad left', 'D-pad right'];
-  const keyName = (c) => c.replace(/^Key/, '').replace(/Left$|Right$/, '').replace('Control', 'Ctrl');
-  const rows = [
-    ['Drive', 'Left stick', 'W A S D'],
-    ['Rotate', 'Right stick', 'J / L or ← →'],
-  ];
-  const seen = new Set();
-  for (const [name, b] of Object.entries(BINDINGS)) {
-    if (name === 'confirm' || seen.has(b.label)) continue;
-    seen.add(b.label);
-    const pads = Object.values(BINDINGS).filter((o) => o.label === b.label && o.pad != null).map((o) => padNames[o.pad]);
-    rows.push([b.label, pads.join(' / ') || '-', [...new Set(b.keys.map(keyName))].join(' / ') || '-']);
-  }
-  ui.controls.innerHTML = '<tr><th>Action</th><th>Controller</th><th>Keyboard</th></tr>' +
-    rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
 }
 
 /** Load the converted team CAD if it exists; keep the placeholder robot otherwise. */

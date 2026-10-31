@@ -83,6 +83,7 @@ export class Robot {
     // ---------------------------------------------------------- drive state
     this.cmd = { vx: 0, vz: 0, omega: 0 };
     this.fieldRelative = true;
+    this.speedScale = cfg.speedLevels[cfg.speedLevels.length - 1];
     this.fieldForward = 0;
     this.moduleAngles = [0, 0, 0, 0];
     this.wheelSpin = [0, 0, 0, 0];
@@ -216,9 +217,9 @@ export class Robot {
    * Turn driver input into a chassis velocity, limited by the robot's acceleration, and apply it.
    * forward / strafe / turn are in [-1, 1].
    */
-  drive(forward, strafe, turn, slow, dt) {
+  drive(forward, strafe, turn, dt) {
     const cfg = this.cfg;
-    const scale = slow ? cfg.slowModeScale : 1;
+    const scale = this.speedScale;
     const yaw = this.yaw();
 
     // Desired velocity in the world frame

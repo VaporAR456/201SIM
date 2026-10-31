@@ -11,23 +11,25 @@ TRENCHES, TOWERS) from the driver station view. FUEL, intake, shooting and scori
 Open the GitHub Pages link for this repo, plug in a controller and press any button on it,
 then press **A** to start.
 
+The default layout matches MoSim's REBUILT keybinds. Everything can be remapped from
+**Controls** in the main or pause menu, with a Reset on every row. Bindings save in your browser.
+
 | Action | Controller | Keyboard |
 | --- | --- | --- |
 | Drive | Left stick | W A S D |
-| Rotate | Right stick | J / L or ← → |
+| Steer | Right stick | J / L |
+| Drive speed 1 / 2 / 3 | - | 1 / 2 / 3 |
 | Intake | LT | Shift |
-| Auto shoot | RT | Space |
+| Auto shoot | RT | K |
 | Auto pass | RB | E |
 | Manual shoot | LB | Q |
-| Robot special | Y | R |
-| Field / robot relative | B | F |
-| Reset gyro | X | G |
-| Slow mode (hold) | Left stick click | Ctrl |
-| Camera | D-pad ← → | C |
+| Climb | D-pad down | C |
+| Robot special 1 / 2 / 3 | Y / X / B | V / I / O |
+| Swap camera | Right stick click | Space |
+| Field / robot relative | Left stick click | F |
+| Reset gyro | D-pad up | G |
 | Pause | Menu | Esc |
 | Restart (hold) | View | Backspace |
-
-The layout is a draft and will be matched to MoSim's.
 
 ## Tune the robot
 
@@ -47,6 +49,13 @@ Built with [Three.js](https://threejs.org) for 3D and [Rapier](https://rapier.rs
 Pushing to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`.
 
 Field measurements come from the 2026 FRC Game Manual, Section 5.
+
+### Updating the robot model
+
+`tools/step2glb.py` turns an Onshape STEP export (Y axis up, hidden instances off) into a GLB with
+OpenCascade (`pip install cadquery-ocp`). `tools/optimize.mjs` strips hardware, simplifies and
+compresses it into `public/models/robot201.glb` (`npm i @gltf-transform/core @gltf-transform/functions
+@gltf-transform/extensions meshoptimizer`).
 
 ### One-time GitHub Pages setup
 

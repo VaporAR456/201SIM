@@ -32,5 +32,6 @@ export const ROBOT_201 = {
   wheelRadius: 2 * IN,
 
   // Driver feel
-  slowModeScale: 0.35,
+  // Drive speed presets (fraction of top speed) for the Drive speed 1 / 2 / 3 buttons
+  speedLevels: [0.35, 0.7, 1],
 };
