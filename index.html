@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>201SIM</title>
+    <meta name="description" content="Driver practice simulator for FRC Team 201's 2026 REBUILT robot" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <section id="menu" class="panel">
+      <h1>201SIM <small>2026 REBUILT driver practice</small></h1>
+      <div class="row">
+        <span class="label">Alliance</span>
+        <button data-alliance="blue" class="blue">Blue <kbd>X</kbd></button>
+        <button data-alliance="red" class="red">Red <kbd>B</kbd></button>
+      </div>
+      <div class="row">
+        <span class="label">Driver station</span>
+        <button data-station="0">Left</button>
+        <button data-station="1">Center</button>
+        <button data-station="2">Right</button>
+        <span class="hint">D-pad ← →</span>
+      </div>
+      <button id="start" class="primary">Start practice <kbd>A</kbd> / <kbd>Enter</kbd></button>
+      <p id="pad-status"></p>
+      <details>
+        <summary>Controls</summary>
+        <table id="controls-table"></table>
+      </details>
+    </section>
+
+    <section id="pause" class="panel" hidden>
+      <h2>Paused</h2>
+      <button id="resume" class="primary">Resume <kbd>Menu</kbd> / <kbd>Esc</kbd></button>
+      <button id="to-menu">Main menu</button>
+    </section>
+
+    <div id="hud" hidden>
+      <div class="hud-left">
+        <div id="hud-mode"></div>
+        <div id="hud-speed"></div>
+        <div id="hud-cam"></div>
+      </div>
+      <div id="hud-actions"></div>
+      <div id="hud-fps"></div>
+      <div id="restart"><div id="restart-bar"></div></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
