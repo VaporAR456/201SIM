@@ -185,7 +185,7 @@ export class Game {
 
     this.fireT -= dt;
     this.robot.spinIndexer(shooting && this.held > 0 ? dt : 0);
-    if (this.aim && this.aim.ready && this.held > 0 && this.fireT <= 0) {
+    if (this.aim && this.aim.ready && this.held > 0 && this.fireT <= 0 && !(this.match?.countdown > 0)) {
       this.launch(this.aim);
       this.fireT = 1 / this.settings.fireRate;
     }
@@ -503,6 +503,7 @@ export class Game {
     const k = this.inside.indexOf(b);
     if (k >= 0) { this.inside.splice(k, 1); this.insideLocal.splice(k, 1); }
     this.shots = (this.shots || 0) + 1;
+    this.onShot?.();
   }
 
   // ------------------------------------------------------------ rules

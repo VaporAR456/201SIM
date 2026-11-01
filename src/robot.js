@@ -2,6 +2,10 @@
 import * as THREE from 'three';
 import { BLUE, GROUP, groups } from './constants.js';
 
+// Control feel multipliers. Baby mode: much softer, for drivers used to MoSim.
+export const FEEL_NORMAL = { speed: 1, accel: 1, turn: 1, expo: 1 };
+export const FEEL_BABY = { speed: 0.55, accel: 0.4, turn: 0.45, expo: 2.2 };
+
 const tmp = new THREE.Vector3();
 
 export class Robot {
@@ -353,7 +357,8 @@ export class Robot {
     const yaw = this.yaw();
 
     // Desired velocity in the world frame
-    const v = Math.min(1, Math.hypot(forward, strafe)) * cfg.maxSpeed * scale;
+    const feel = this.feel || FEEL_NORMAL;
+    const v = Math.min(1, Math.hypot(forward, strafe)) * cfg.maxSpeed * scale * feel.speed;
     const n = Math.hypot(forward, strafe) || 1;
     const f = (forward / n) * v;
     const s = (strafe / n) * v;
@@ -362,7 +367,7 @@ export class Robot {
     const c = Math.cos(ref), sn = Math.sin(ref);
     let dvx = f * c + s * sn;
     let dvz = -f * sn + s * c;
-    const dOmega = -turn * cfg.maxOmega * scale; // stick right turns clockwise
+    const dOmega = -turn * cfg.maxOmega * scale * feel.turn; // stick right turns clockwise
 
     // Start from what the robot is actually doing (walls and robots stop it)
     const lv = this.body.linvel();
@@ -370,12 +375,12 @@ export class Robot {
     let vx = lv.x, vz = lv.z;
     let ex = dvx - vx, ez = dvz - vz;
     const e = Math.hypot(ex, ez);
-    const maxDv = cfg.maxAccel * dt;
+    const maxDv = cfg.maxAccel * feel.accel * dt;
     if (e > maxDv) { ex *= maxDv / e; ez *= maxDv / e; }
     vx += ex; vz += ez;
     let omega = av.y;
     const eo = dOmega - omega;
-    omega += Math.max(-cfg.maxAlpha * dt, Math.min(cfg.maxAlpha * dt, eo));
+    omega += Math.max(-cfg.maxAlpha * feel.accel * dt, Math.min(cfg.maxAlpha * feel.accel * dt, eo));
 
     // How far the robot is tipped from upright. Real 201 is low and heavy: it tilts over the
     // BUMPS but doesn't go over, so past a small tilt it is pushed back flat, and if it ever does

@@ -7,7 +7,8 @@ import { buildAprilTags } from './apriltags.js';
 import { HALF_L, HALF_W, FIELD_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, TRENCH, HUB } from './constants.js';
 import { buildField } from './field.js';
 import { buildArena } from './arena.js';
-import { Robot } from './robot.js';
+import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
+import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
@@ -47,6 +48,7 @@ const ui = {
   sbLeft: document.getElementById('sb-left'),
   results: document.getElementById('results'),
   human: document.getElementById('hud-human'),
+  countdown: document.getElementById('countdown'),
   resultsBody: document.getElementById('results-body'),
 };
 
@@ -248,6 +250,7 @@ async function init() {
   const start = () => {
     restart();
     setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.camDs ?? settings.station);
+    snapCam = true;
     // otherwise Space (swap camera) would "click" the Start button again
     document.activeElement?.blur?.();
     state = 'play';
@@ -274,7 +277,18 @@ async function init() {
   // Settings screen (shooter power, fire rate, hopper size)
   const settingsPanel = document.getElementById('settings');
   let settingsFrom = null;
-  buildSettingsPanel(settingsPanel, player, (k) => { if (k === 'graphics') applyGraphics(); });
+  const sound = new Sound();
+  sound.setVolume(player.volume / 100);
+  // browsers only start audio from a click or key press
+  addEventListener('pointerdown', () => sound.unlock());
+  addEventListener('keydown', () => sound.unlock());
+  game.onShot = () => sound.shot();
+  let lastPhase = null;
+  let lastCountdown = 0;
+  const applyFeel = () => { robot.feel = player.controlFeel === 'Baby mode' ? FEEL_BABY : FEEL_NORMAL; };
+  applyFeel();
+  buildSettingsPanel(settingsPanel, player, (k) => { if (k === 'graphics') applyGraphics(); if (k === 'controlFeel' || k === 'graphics') applyFeel(); });
+  settingsPanel.addEventListener('input', () => sound.setVolume(player.volume / 100));
   const openSettings = () => {
     settingsFrom = state;
     ui.menu.hidden = true;
@@ -354,7 +368,10 @@ async function init() {
         const aimTurn = game.update(inp, STEP, settings.alliance);
         // shooting on the move: the drive slows right down so the shots can land
         const slow = game.aim && game.held > 0 ? 0.3 : 1;
-        robot.drive(inp.forward * slow, inp.strafe * slow, aimTurn ?? inp.turn, STEP);
+        // baby mode softens the sticks too: small pushes do a lot less
+        const ex = robot.feel?.expo ?? 1;
+        const soft = (v) => Math.sign(v) * Math.abs(v) ** ex;
+        robot.drive(soft(inp.forward) * slow, soft(inp.strafe) * slow, aimTurn ?? soft(inp.turn), STEP);
         world.step();
         robot.snapshot();
         fuel.snapshot();
@@ -363,6 +380,20 @@ async function init() {
       physMs += performance.now() - p0;
       const wasDisabled = match.disabled;
       if (match.update(dt)) showResults();
+      // match sounds on each change of period
+      if (match.on) {
+        const ph = match.over ? 'MATCH OVER' : match.phase().name;
+        if (lastCountdown > 0 && match.countdown === 0) sound.cue('start');
+        else if (lastPhase && ph !== lastPhase) {
+          if (ph === 'AUTO DONE') sound.cue('auto-end');
+          else if (ph === 'TRANSITION') sound.cue('teleop');
+          else if (ph.startsWith('SHIFT')) sound.cue('shift');
+          else if (ph === 'END GAME') sound.cue('endgame');
+          else if (ph === 'MATCH OVER') sound.cue('end');
+        }
+        lastPhase = ph;
+        lastCountdown = match.countdown;
+      } else { lastPhase = null; lastCountdown = 0; }
       if (match.disabled && !match.over && !wasDisabled) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
       if (match.over && !ui.results.hidden) {
         if (input.pressed('confirm')) keepDriving();
@@ -379,6 +410,7 @@ async function init() {
     fuel.sync(alpha);
     game.drawAim();
     game.drawHeld(now / 1000);
+    sound.updateRobot(robot.speed(), robot.cmd.omega, !!game.aim && game.held > 0, state === 'play');
     updateCamera(dt);
     renderer.render(scene, camera);
 
@@ -393,6 +425,11 @@ async function init() {
       setText(ui.actions, on.join(' · '));
       setText(ui.held, `${game.held} / ${game.capacity}`);
       setText(ui.human, String(game.human.stash));
+      // 3-2-1-GO (GO stays up for a moment once the clock starts)
+      const cd = match.on ? match.countdown : 0;
+      const cdText = cd > 0 ? String(Math.ceil(cd)) : match.on && match.t < 0.8 ? 'GO!' : '';
+      setText(ui.countdown, cdText);
+      ui.countdown.className = cdText ? (cd > 0 ? 'show' : 'show go') : '';
       setText(ui.net, game.netBroken ? 'NET BROKEN' : game.strain > 1 ? 'NET STRAINING: back off!' : '');
       updateScorebar();
       const a = game.aim;
@@ -487,6 +524,7 @@ async function init() {
 
   let camYaw = 0;
   let camDist = 3.4;
+  let snapCam = false;
   let menuT = 0.6;
   const hubs = [hubCenter(BLUE), hubCenter(RED)];
   // the HUB itself plus the net that leans out over its NEUTRAL ZONE side (up to ~1 m out, 3 m up)
@@ -536,8 +574,16 @@ async function init() {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
     }
-    const k = 1 - Math.exp(-dt * (mode === 0 ? 6 : 8));
+    // jump straight there when play starts, rather than sweeping in from the menu view
+    const k = snapCam ? 1 : 1 - Math.exp(-dt * (mode === 0 ? 6 : 8));
+    if (snapCam && camera.userData.look) camera.userData.look.copy(camLook);
+    snapCam = false;
     camera.position.lerp(camPos, k);
+    // the follow camera never pokes through the guardrails or the alliance walls, even mid-swing
+    if (mode === 1) {
+      camera.position.x = Math.max(-HALF_L + 0.3, Math.min(HALF_L - 0.3, camera.position.x));
+      camera.position.z = Math.max(-HALF_W + 0.2, Math.min(HALF_W - 0.2, camera.position.z));
+    }
     if (!camera.userData.look) camera.userData.look = camLook.clone();
     camera.userData.look.lerp(camLook, k);
     camera.lookAt(camera.userData.look);

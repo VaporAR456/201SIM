@@ -32,6 +32,8 @@ export class Match {
     this.lastActive = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;
     this.overT = 0;
+    // 3-2-1-GO before the clock starts: drive around and get your bearings (no scoring yet)
+    this.countdown = on ? 3 : 0;
   }
 
   /** True while the robot is disabled (the pause between AUTO and TELEOP, or after the match). */
@@ -68,6 +70,7 @@ export class Match {
   update(dt) {
     if (!this.on) return false;
     if (this.over) { this.overT += dt; return false; }
+    if (this.countdown > 0) { this.countdown = Math.max(0, this.countdown - dt); return false; }
     const autoNames = ['AUTO', 'AUTO DONE'];
     const wasAuto = autoNames.includes(this.phase().name);
     this.t += dt;

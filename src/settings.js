@@ -7,6 +7,14 @@ export const SETTING_DEFS = {
     label: 'Graphics', type: 'choice', options: ['Auto', 'High', 'Medium', 'Low'], def: 'Auto',
     help: 'Auto starts on High and steps down if the frame rate drops. Low turns off shadows and renders at a lower resolution.',
   },
+  controlFeel: {
+    label: 'Control feel', type: 'choice', options: ['Normal', 'Baby mode'], def: 'Normal',
+    help: 'Normal is the real robot: full speed and turn rate, very twitchy. Baby mode is much softer (slower top speed, gentler acceleration and turning, softer sticks) for drivers coming from MoSim.',
+  },
+  volume: {
+    label: 'Volume', unit: '%', min: 0, max: 100, step: 5, def: 80,
+    help: 'Match sounds and robot noise.',
+  },
   hubPower: {
     label: 'HUB shot power', unit: '%', min: 80, max: 120, step: 1, def: 100,
     help: '100% lands auto shots in the HUB. Raise or lower it to match how the real shooter behaves.',
