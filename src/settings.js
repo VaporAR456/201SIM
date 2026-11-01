@@ -24,7 +24,7 @@ export const SETTING_DEFS = {
     help: 'How much harder the shooter spins when passing, so you can reach your alliance zone from across the field. 100% means no boost.',
   },
   bpsTotal: {
-    label: 'Fire rate (both shooters)', unit: ' FUEL/s', min: 2, max: 16, step: 0.5, def: 8,
+    label: 'Fire rate', unit: ' FUEL/s', min: 2, max: 16, step: 0.5, def: 8,
     help: '201 has a double shooter: two exits that fire side by side, one FUEL each per volley. This is the total for both (201\'s best is about 9, average about 7).',
   },
   capacity: {
