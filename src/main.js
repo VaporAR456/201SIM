@@ -9,6 +9,7 @@ import { buildField } from './field.js';
 import { Maps, MAPS } from './maps.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
+import { TouchControls } from './touch.js';
 import { Humans } from './humans.js';
 import { HubLights } from './hublights.js';
 import { AIPlayers, resetAiMemory, TEAM_LIST } from './ai.js';
@@ -117,7 +118,8 @@ async function init() {
     }
   }
   const LEVELS = { High: { dpr: 1.5, shadow: 2048 }, Medium: { dpr: 1, shadow: 1024 }, Low: { dpr: 0.75, shadow: 0 } };
-  let autoLevel = 'High';
+  // phones and tablets start a step lower (small GPU, high-DPI screen)
+  let autoLevel = (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) ? 'Medium' : 'High';
   const level = () => (player.graphics === 'Auto' ? autoLevel : player.graphics) || 'High';
   function applyGraphics() {
     const L = LEVELS[level()];
@@ -176,6 +178,8 @@ async function init() {
     else if (lineup) setTimeout(() => toast(`Opponents: ${lineup}`, 'info', 4), 300);
   };
   const input = new Input();
+  const touch = new TouchControls();
+  input.touch = touch;
 
   // ------------------------------------------------------------ menu
   let state = 'menu';
@@ -420,6 +424,7 @@ async function init() {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     input.poll();
+    touch.show(state === 'play');
     setText(ui.pad, input.padName ? `Controller: ${input.padName.replace(/\(.*?\)/g, '').trim()}` : 'No controller found. Press any button on it, or use the keyboard.');
     ui.pad.classList.toggle('ok', !!input.padName);
 

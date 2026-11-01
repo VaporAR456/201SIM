@@ -212,3 +212,51 @@ body:has(#pause:not([hidden])) #countdown { display: none; }
 .pick-row b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pick-row input { width: 100%; }
 @media (max-width: 700px) { .pick-row { grid-template-columns: 1fr; } }
+
+/* ---------------------------------------------------------- phones and tablets */
+#touch { position: fixed; inset: 0; z-index: 2; pointer-events: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+#touch[hidden] { display: none; }
+#touch .tstick { position: absolute; bottom: 0; top: 30%; pointer-events: auto; touch-action: none; }
+#touch .tstick.left { left: 0; width: 38%; }
+#touch .tstick.right { right: 0; width: 26%; top: 55%; }
+#touch .tstick::before { content: ''; position: absolute; width: 130px; height: 130px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.25); background: rgba(0,0,0,.18); left: 18%; bottom: 18%; }
+#touch .tstick.on::before { left: calc(var(--x) - 65px); top: calc(var(--y) - 65px); bottom: auto; }
+#touch .tstick .knob { position: absolute; width: 58px; height: 58px; border-radius: 50%; background: rgba(255,255,255,.55);
+  left: calc(18% + 36px); bottom: calc(18% + 36px); pointer-events: none; }
+#touch .tstick.on .knob { left: calc(var(--x) - 29px); top: calc(var(--y) - 29px); bottom: auto; }
+#touch .tstick.right::before { width: 150px; height: 70px; border-radius: 35px; left: 10%; bottom: 25%; }
+#touch .tstick.right .knob { left: calc(10% + 46px); bottom: calc(25% + 6px); }
+#touch .tstick.right.on::before { left: calc(var(--x) - 75px); top: calc(var(--y) - 35px); }
+#touch .tbtns { position: absolute; right: max(12px, env(safe-area-inset-right)); top: 22%; width: 34%; height: 34%;
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 1fr; gap: 8px; pointer-events: none; }
+#touch .tbtn { pointer-events: auto; touch-action: none; border-radius: 14px; border: 2px solid rgba(255,255,255,.3);
+  background: rgba(20,24,30,.55); color: #fff; font-weight: 800; font-size: 13px; padding: 0; min-height: 40px; }
+#touch .tbtn.on { background: var(--accent); color: #111; border-color: var(--accent); }
+#touch .tbtn.big { grid-column: span 2; grid-row: span 2; font-size: 17px; }
+#touch .tbtn.shoot { background: rgba(255,176,0,.35); }
+#touch .tbtn.mid { grid-column: span 2; }
+#touch .tbtn.fs { position: absolute; left: max(10px, env(safe-area-inset-left)); top: 10px; width: 44px; height: 44px; }
+body.touch kbd { display: none; }
+body.touch #hud-actions { display: none; }
+@media (max-width: 900px), (max-height: 520px) {
+  .mainmenu { grid-template-columns: 1fr; overflow: auto; padding: 16px; gap: 14px; }
+  .mm-logo { font-size: 48px; }
+  .mm-nav { margin-top: 12px; flex-direction: row; flex-wrap: wrap; width: 100%; }
+  .mm-nav button { font-size: 16px; padding: 10px 14px; }
+  .mm-nav .mm-play { font-size: 20px; padding: 12px 18px; }
+  .mm-setup { max-height: none; padding: 14px; }
+  .mm-foot { display: none; }
+}
+@media (orientation: portrait) and (pointer: coarse) {
+  body.touch #touch:not([hidden])::after { content: 'Turn your phone sideways'; position: fixed; inset: 0; display: grid; place-items: center;
+    background: rgba(0,0,0,.85); color: #fff; font: 700 20px system-ui; pointer-events: auto; }
+}
+@media (pointer: coarse) and (max-height: 600px) {
+  body.touch .hud-left { transform: scale(.62); transform-origin: top left; top: 64px !important; opacity: .85; }
+  body.touch #scorebar { --w: 54vw; }
+  #touch .tbtns { top: 30%; height: 38%; width: 32%; }
+  #touch .tstick.right { top: 70%; }
+  #touch .tstick.right::before { bottom: 12%; }
+  #touch .tstick.right .knob { bottom: calc(12% + 6px); }
+}

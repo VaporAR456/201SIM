@@ -231,6 +231,14 @@ export class Input {
     const kr = (next.rotRight ? 1 : 0) - (next.rotLeft ? 1 : 0);
     if (kr) rx = kr * 0.8;
 
+    // touch screen sticks and buttons (phones / tablets)
+    const t = this.touch;
+    if (t?.enabled) {
+      if (t.lx || t.ly) { [lx, ly] = shape(t.lx, t.ly); }
+      if (t.rx) rx = shape1(t.rx);
+      for (const [name, on] of Object.entries(t.held)) if (on) next[name] = true;
+    }
+
     this.forward = ly;
     this.strafe = lx;
     this.turn = rx;
