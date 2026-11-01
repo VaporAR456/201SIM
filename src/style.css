@@ -103,11 +103,47 @@ th { color: var(--muted); font-weight: 600; }
 .sb-hub:empty { display: none; }
 .sb-team.dim, .sb-score.dim { opacity: .55; }
 #scorebar.final { --w: min(94vw, 1500px); top: 16vh; }
-#results { position: fixed; top: calc(16vh + min(94vw, 1500px) * .16 + 24px); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px));
-  background: var(--bg); border-radius: 12px; padding: 18px 22px; z-index: 4; }
+/* final results, like the FRC broadcast */
+#results { position: fixed; inset: 0; z-index: 4; display: flex; flex-direction: column; justify-content: center; padding: 3vh 1.5vw;
+  background: linear-gradient(90deg, #0b4f8f 0 50%, #a3141c 50% 100%); font-family: 'Arial Narrow', 'Roboto Condensed', system-ui, sans-serif; overflow-y: auto; }
 #results[hidden] { display: none; }
-#results table { font-size: 15px; }
-#results td:last-child { text-align: right; font-weight: 700; color: var(--accent); }
+#results-body { display: grid; grid-template-columns: 31fr 38fr 31fr; gap: 0; align-items: stretch; }
+.fr-col { display: flex; flex-direction: column; gap: 3vh; padding: 0 1vw; }
+.fr-winner { height: clamp(90px, 20vh, 220px); display: flex; align-items: center; justify-content: center; gap: .3em; font-weight: 900; font-size: clamp(30px, 4.4vw, 88px); line-height: 1;
+  background: linear-gradient(180deg, #7a7400, #c8b400); color: #141414; letter-spacing: -.01em; }
+.fr-winner svg { width: .8em; height: .8em; fill: #141414; }
+.fr-winner.tie { background: rgba(255,255,255,.18); color: #fff; }
+.fr-winner.none { background: transparent; }
+.fr-teams { display: flex; flex-direction: column; gap: 10px; }
+.fr-team { display: flex; height: clamp(38px, 7vh, 72px); font-size: clamp(20px, 2.6vw, 42px); color: #fff; }
+.fr-team span { flex: 1; display: flex; align-items: center; padding: 0 .6em; background: #1272c4; }
+.fr-col.red .fr-team span { background: #e0202a; }
+.fr-team b { width: 2.6em; display: flex; align-items: center; justify-content: center; background: #1d1f22; }
+.fr-team.empty { opacity: .45; }
+.fr-rp h3 { margin: 0 0 .5em; text-align: center; color: #fff; font-weight: 900; font-size: clamp(18px, 2vw, 34px); line-height: 1; }
+.fr-icons { display: flex; gap: 8px; justify-content: center; }
+.fr-icons span { width: clamp(32px, 4vw, 66px); aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.25); }
+.fr-icons svg { width: 70%; fill: rgba(255,255,255,.18); }
+.fr-icons span.got { background: #1677d2; } .fr-col.red .fr-icons span.got { background: #e0202a; }
+.fr-icons span.got svg { fill: #fff; }
+.fr-mid { display: flex; flex-direction: column; }
+.fr-scores { display: grid; grid-template-columns: 1fr 1fr; height: clamp(90px, 20vh, 220px); }
+.fr-scores div { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ddd; font-weight: 900; font-size: clamp(48px, 8vw, 140px); line-height: 1; }
+.fr-scores .blue { background: #063a6b; } .fr-scores .red { background: #c21a22; }
+.fr-scores small { font-size: .28em; color: #9fb3c8; margin-bottom: .2em; } .fr-scores .red small { color: #f0b0b0; }
+.fr-table { background: #d9d9d9; color: #1a1a1a; }
+.fr-head { text-align: center; font-weight: 900; font-size: clamp(16px, 1.9vw, 32px); line-height: 1.6; background: #c4c4c4; }
+.fr-row { display: grid; grid-template-columns: 1fr 1.4fr 1fr; align-items: center; font-weight: 900; font-size: clamp(16px, 1.9vw, 32px); line-height: 1.5; border-top: 1px solid rgba(0,0,0,.08); }
+.fr-row b { text-align: center; font-size: 1.3em; } .fr-row span { text-align: center; }
+.fr-row.lite { background: #f2f2f2; }
+.fr-stats { margin-top: 2vh; background: rgba(0,0,0,.35); color: #e8e8e8; padding: 10px 14px; font: 500 clamp(12px, 1.1vw, 16px)/1.5 system-ui, sans-serif; text-align: center; }
+.fr-stats b { color: #fff; }
+#results > .row.center { margin-top: 3vh; }
+@media (max-width: 760px) {
+  #results { justify-content: flex-start; background: #0b2a4a; }
+  #results-body { grid-template-columns: 1fr; gap: 16px; }
+  .fr-mid { order: -1; }
+}
 .row.center { justify-content: center; margin: 14px 0 0; }
 .row.center .primary { margin: 0; }
 @media (max-width: 900px) { #scorebar { --w: 70vw; } }

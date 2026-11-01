@@ -207,6 +207,8 @@ async function init() {
   const keepDriving = () => {
     ui.results.hidden = true;
     ui.scorebar.classList.remove('final');
+    ui.scorebar.hidden = false;
+    ui.hud.classList.remove('final');
     match.reset(false);
     document.activeElement?.blur?.();
   };
@@ -407,6 +409,8 @@ async function init() {
       } else { lastPhase = null; lastCountdown = 0; }
       if (match.disabled && !match.over && !wasDisabled && match.countdown === 0) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
       if (match.over && !ui.results.hidden) {
+        // FUEL still counts for 3 seconds after 0:00: keep the numbers live until then
+        if (match.overT < 3.5) renderResults();
         const used = nav.update(ui.results, pad, dt);
         if (used) { /* A pressed the highlighted button */ }
         else if (input.pressed('confirm') && !navPressed(pad, PAD.A)) keepDriving();
@@ -519,19 +523,64 @@ async function init() {
   }
   game.onFoul = (msg) => toast(msg);
 
-  function showResults() {
+  // The end-of-match screen, laid out like the FRC broadcast's results: winner, scores, AUTO and
+  // TELEOP breakdown, teams and ranking points. RP thresholds are REBUILT's: ENERGIZED at 100
+  // FUEL, SUPERCHARGED at 360 FUEL, TRAVERSAL at 50 TOWER points, plus 3 for a win / 1 for a tie.
+  const RP_ICONS = {
+    fuel: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>',
+    super: '<svg viewBox="0 0 24 24"><circle cx="12" cy="6" r="4"/><circle cx="6" cy="13" r="4"/><circle cx="18" cy="13" r="4"/><circle cx="12" cy="19" r="4"/></svg>',
+    tower: '<svg viewBox="0 0 24 24"><path d="M5 3h3v3h2.5V3h3v3H16V3h3v6l-2 2v7h2v3H5v-3h2v-7L5 9z"/></svg>',
+    win: '<svg viewBox="0 0 24 24"><path d="M6 3h12v2h3v3a5 5 0 0 1-4.6 5A6 6 0 0 1 13 16.9V19h3v2H8v-2h3v-2.1A6 6 0 0 1 7.6 13 5 5 0 0 1 3 8V5h3zM5 7v1a3 3 0 0 0 1.6 2.7A9 9 0 0 1 6 7zm14 0h-1a9 9 0 0 1-.6 3.7A3 3 0 0 0 19 8z"/></svg>',
+  };
+  function renderResults() {
     const mine = settings.alliance;
-    const pts = match.points[mine];
+    const opp = mine === BLUE ? RED : BLUE;
+    const fouls = game.fouls.reduce((a, f) => a + f.pts, 0);
+    const side = (al) => {
+      const total = match.points[al];
+      const pen = al === opp ? fouls : 0;
+      const auto = match.autoFuel[al];
+      return { total, auto, tele: Math.max(0, total - auto - pen), pen, fuel: total - pen };
+    };
+    const S = { [BLUE]: side(BLUE), [RED]: side(RED) };
+    const won = S[BLUE].total > S[RED].total ? BLUE : S[RED].total > S[BLUE].total ? RED : null;
+    const rp = (al) => {
+      const res = won === al ? 3 : won === null ? 1 : 0;
+      return [S[al].fuel >= 100 && 'fuel', S[al].fuel >= 360 && 'super', false, res >= 1, res >= 2, res >= 3];
+    };
+    const icons = (al) => {
+      const got = rp(al);
+      return ['fuel', 'super', 'tower', 'win', 'win', 'win'].map((k, i) => `<span class="${got[i] ? 'got' : ''}">${RP_ICONS[k]}</span>`).join('');
+    };
+    const teams = (al) => {
+      const nums = al === mine ? ['201', '', ''] : ['', '', ''];
+      const rpTotal = rp(al).filter(Boolean).length;
+      return nums.map((n) => `<div class="fr-team ${n ? '' : 'empty'}"><span>${n || '----'}</span><b>${n ? rpTotal : ''}</b></div>`).join('');
+    };
+    const winner = (al) => won === al ? '<div class="fr-winner">' + RP_ICONS.win + 'WINNER</div>'
+      : won === null ? '<div class="fr-winner tie">TIE</div>' : '<div class="fr-winner none"></div>';
+    const row = (label, k, cls = '') => `<div class="fr-row ${cls}"><b>${S[BLUE][k]}</b><span>${label}</span><b>${S[RED][k]}</b></div>`;
+    const pts = match.points[mine] - (mine === opp ? fouls : 0);
+    const acc = game.shots ? Math.round(((pts + game.missedInactive) / game.shots) * 100) : 0;
+    ui.resultsBody.innerHTML = `
+      <div class="fr-col blue">${winner(BLUE)}<div class="fr-teams">${teams(BLUE)}</div>
+        <div class="fr-rp"><h3>RANKING POINTS</h3><div class="fr-icons">${icons(BLUE)}</div></div></div>
+      <div class="fr-mid">
+        <div class="fr-scores"><div class="blue"><small>BLUE</small>${S[BLUE].total}</div><div class="red"><small>RED</small>${S[RED].total}</div></div>
+        <div class="fr-table">
+          <div class="fr-head">AUTO</div>${row('FUEL', 'auto')}<div class="fr-row"><b>0</b><span>TOWER</span><b>0</b></div>
+          <div class="fr-head">TELEOP</div>${row('FUEL', 'tele', 'lite')}<div class="fr-row lite"><b>0</b><span>TOWER</span><b>0</b></div>${row('PENALTY', 'pen', 'lite')}
+        </div>
+        <div class="fr-stats">201: <b>${game.shots}</b> FUEL shot · <b>${acc}%</b> went in · <b>${game.missedInactive}</b> in an inactive HUB · fouls: <b>${game.fouls.length ? game.fouls.map((f) => `${f.kind} ${f.rule}`).join(', ') : 'none'}</b></div>
+      </div>
+      <div class="fr-col red">${winner(RED)}<div class="fr-teams">${teams(RED)}</div>
+        <div class="fr-rp"><h3>RANKING POINTS</h3><div class="fr-icons">${icons(RED)}</div></div></div>`;
+  }
+  function showResults() {
     updateScorebar();
-    ui.scorebar.classList.add('final');
+    ui.scorebar.hidden = true;
     ui.hud.classList.add('final');
-    ui.resultsBody.innerHTML =
-      `<table><tr><td>FUEL shot</td><td>${game.shots}</td></tr>` +
-      `<tr><td>Scored in an active HUB</td><td>${pts}</td></tr>` +
-      `<tr><td>Went in while inactive (no points)</td><td>${game.missedInactive}</td></tr>` +
-      `<tr><td>Accuracy</td><td>${game.shots ? Math.round(((pts + game.missedInactive) / game.shots) * 100) : 0}%</td></tr>` +
-      `<tr><td>Scored in AUTO</td><td>${match.autoFuel[mine]}</td></tr>` +
-      `<tr><td>Fouls against 201</td><td>${game.fouls.length ? game.fouls.map((f) => `${f.kind} ${f.rule}`).join(', ') + ` (${game.fouls.reduce((a, f) => a + f.pts, 0)} pts)` : 'none'}</td></tr></table>`;
+    renderResults();
     ui.results.hidden = false;
   }
 
@@ -600,7 +649,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match }; // handy for debugging in the console
 }
 
 /**
