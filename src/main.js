@@ -6,7 +6,7 @@ import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.j
 import { buildAprilTags } from './apriltags.js';
 import { HALF_L, HALF_W, FIELD_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, TRENCH, HUB } from './constants.js';
 import { buildField } from './field.js';
-import { buildArena } from './arena.js';
+import { Maps, MAPS } from './maps.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
 import { Humans } from './humans.js';
@@ -87,7 +87,8 @@ async function init() {
   });
 
 
-  scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6b5a45, 1.1));
+  const hemi = new THREE.HemisphereLight(0xfff4e0, 0x6b5a45, 1.1);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(-4, 14, 6);
   sun.castShadow = true;
@@ -136,7 +137,9 @@ async function init() {
   world.timestep = STEP;
   // more solver passes: a hopper full of FUEL pressing on its walls while the robot spins stays put
   world.integrationParameters.numSolverIterations = 8;
-  buildArena(scene);
+  const maps = new Maps(scene, hemi);
+  try { settings.map = localStorage.getItem('201sim.map') || 'random'; } catch { settings.map = 'random'; }
+  maps.show(settings.map === 'random' ? maps.random() : settings.map);
   const fieldGroup = buildField(scene, RAPIER, world);
   // The field's own colliders: give them a group of their own, so the hopper's FUEL-only
   // parts (net, gate, upper side plates) pass through walls and the TRENCH arm
@@ -241,6 +244,13 @@ async function init() {
     try { localStorage.setItem('201sim.aiLevel', settings.aiLevel); } catch { /* not saved */ }
     refreshMenu();
   }));
+  const mapBtns = document.querySelectorAll('[data-map]');
+  mapBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.map = b.dataset.map;
+    try { localStorage.setItem('201sim.map', settings.map); } catch { /* not saved */ }
+    if (settings.map !== 'random') maps.show(settings.map); // preview it behind the menu
+    refreshMenu();
+  }));
   const preloadBtns = document.querySelectorAll('[data-preload]');
   preloadBtns.forEach((b) => b.addEventListener('click', () => {
     settings.preload = b.dataset.preload === 'on';
@@ -270,6 +280,7 @@ async function init() {
     modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
     camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
     preloadBtns.forEach((b) => b.classList.toggle('on', (b.dataset.preload === 'on') === settings.preload));
+    mapBtns.forEach((b) => b.classList.toggle('on', b.dataset.map === settings.map));
     spawnBtns.forEach((b) => b.classList.toggle('on', b.dataset.spawn === settings.spawn));
     document.querySelectorAll('[data-vs]').forEach((b) => b.classList.toggle('on', b.dataset.vs === settings.vs));
     document.querySelectorAll('[data-ailevel]').forEach((b) => b.classList.toggle('on', b.dataset.ailevel === settings.aiLevel));
@@ -298,6 +309,8 @@ async function init() {
   }
   const camName = () => CAMERAS[camIndex];
   const start = () => {
+    // the map: the one picked, or a different random one every match
+    maps.show(settings.map === 'random' ? maps.random() : settings.map);
     setupAi();
     restart();
     setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.camDs ?? settings.station);
@@ -715,7 +728,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { get hubLights() { return hubLights; }, robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match, ai }; // handy for debugging in the console
+  window.__sim = { get hubLights() { return hubLights; }, nav, maps, robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match, ai }; // handy for debugging in the console
 }
 
 /**
