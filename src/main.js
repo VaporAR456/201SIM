@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { HALF_L, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS } from './constants.js';
+import { HALF_L, HALF_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS } from './constants.js';
 import { buildField } from './field.js';
 import { buildArena } from './arena.js';
 import { Robot } from './robot.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
-import { Fuel } from './fuel.js';
+import { Fuel, hubCenter } from './fuel.js';
 import { Game } from './game.js';
 import { loadSettings, buildSettingsPanel } from './settings.js';
 import { Match, clock } from './match.js';
@@ -18,6 +18,8 @@ import './style.css';
 // views the camera button cycles through; the three driver stations are separate from where the robot starts
 const CAMERAS = ['Driver station 1', 'Driver station 2', 'Driver station 3', 'Third person', 'Overhead'];
 const THIRD = 3;
+// stands in for the controls while the robot is disabled
+const IDLE = { held: () => false, pressed: () => false, forward: 0, strafe: 0, turn: 0 };
 const STEP = 1 / 60;
 const MAX_STEPS = 4; // per frame; on a slow computer the sim slows down instead of freezing
 
@@ -117,8 +119,12 @@ async function init() {
 
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = STEP;
+  // more solver passes: a hopper full of FUEL pressing on its walls while the robot spins stays put
+  world.integrationParameters.numSolverIterations = 8;
   buildArena(scene);
-  buildField(scene, RAPIER, world);
+  const fieldGroup = buildField(scene, RAPIER, world);
+  // the official field CAD replaces the simple field drawing (the simple colliders stay)
+  loadFieldCad(scene).then((ok) => { if (ok) fieldGroup.visible = false; });
 
   const robot = new Robot(scene, RAPIER, world, ROBOT_201, settings.alliance);
   loadCad(robot);
@@ -287,6 +293,7 @@ async function init() {
       if (input.pressed('toggleFieldRel')) robot.fieldRelative = !robot.fieldRelative;
       if (input.pressed('resetGyro')) robot.fieldForward = robot.yaw();
       if (input.pressed('swapCamera')) setCamera((camIndex + 1) % CAMERAS.length);
+      if (input.pressed('flipCamera')) camFlip = !camFlip;
       if (input.pressed('speed1')) robot.speedScale = robot.cfg.speedLevels[0];
       if (input.pressed('speed2')) robot.speedScale = robot.cfg.speedLevels[1];
       if (input.pressed('speed3')) robot.speedScale = robot.cfg.speedLevels[2];
@@ -300,14 +307,21 @@ async function init() {
       const p0 = performance.now();
       while (acc >= STEP) {
         // in third person, "forward" on the stick is the way the camera looks
-        robot.driveRef = camIndex === THIRD ? camYaw : null;
-        const aimTurn = game.update(input, STEP, settings.alliance);
-        robot.drive(input.forward, input.strafe, aimTurn ?? input.turn, STEP);
+        robot.driveRef = camIndex === THIRD ? camYaw + (camFlip ? 0 : Math.PI) : null;
+        // the pause between AUTO and TELEOP (and after the buzzer): robot disabled
+        const inp = match.disabled ? IDLE : input;
+        const aimTurn = game.update(inp, STEP, settings.alliance);
+        robot.drive(inp.forward, inp.strafe, aimTurn ?? inp.turn, STEP);
         world.step();
+        robot.snapshot();
+        fuel.snapshot();
         acc -= STEP;
       }
       physMs += performance.now() - p0;
+      const wasDisabled = match.disabled;
       if (match.update(dt)) showResults();
+      if (match.disabled && !match.over && !wasDisabled) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
+      if (toastT > 0 && (toastT -= dt) <= 0) toastEl.className = '';
       if (match.over && !ui.results.hidden) {
         if (input.pressed('confirm')) keepDriving();
         else if (input.pressed('special1')) start();
@@ -317,8 +331,9 @@ async function init() {
     }
 
     navPrev = pad ? pad.buttons.map((b) => b.value) : [];
-    robot.sync(dt);
-    fuel.sync();
+    const alpha = state === 'play' ? acc / STEP : 1;
+    robot.sync(dt, alpha);
+    fuel.sync(alpha);
     game.drawAim();
     game.drawHeld(now / 1000);
     updateCamera(dt);
@@ -392,12 +407,22 @@ async function init() {
     }
     const ph = match.phase();
     // the big clock counts down AUTO, then the 2:20 of teleop; below it: period number and time left in it
-    const left = ph.name === 'AUTO' ? ph.left : Math.max(0, 160 - match.t);
+    const left = ph.name === 'AUTO' ? ph.left : ph.name === 'AUTO DONE' ? 0 : match.teleopLeft();
     const idx = TELEOP.indexOf(ph.name);
     setText(ui.sbClock, match.over ? 'FINAL' : clock(Math.ceil(left)));
-    setText(ui.sbPhase, match.over ? '6 / 6' : idx >= 0 ? `${idx + 1} / 6` : 'AUTO');
+    setText(ui.sbPhase, match.over ? '6 / 6' : idx >= 0 ? `${idx + 1} / 6` : ph.name === 'AUTO DONE' ? 'TELEOP IN' : 'AUTO');
     setText(ui.sbLeft, match.over ? ':00' : `:${String(Math.ceil(ph.left)).padStart(2, '0')}`);
   }
+
+  // short message under the score bar (fouls, the AUTO-to-TELEOP pause)
+  const toastEl = document.getElementById('toast');
+  let toastT = 0;
+  function toast(msg, kind = 'foul', secs = 3) {
+    toastEl.textContent = msg;
+    toastEl.className = `show ${kind}`;
+    toastT = secs;
+  }
+  game.onFoul = (msg) => toast(msg);
 
   function showResults() {
     const mine = settings.alliance;
@@ -409,14 +434,18 @@ async function init() {
       `<tr><td>Scored in an active HUB</td><td>${pts}</td></tr>` +
       `<tr><td>Went in while inactive (no points)</td><td>${game.missedInactive}</td></tr>` +
       `<tr><td>Accuracy</td><td>${game.shots ? Math.round(((pts + game.missedInactive) / game.shots) * 100) : 0}%</td></tr>` +
-      `<tr><td>Scored in AUTO</td><td>${match.autoFuel[mine]}</td></tr></table>`;
+      `<tr><td>Scored in AUTO</td><td>${match.autoFuel[mine]}</td></tr>` +
+      `<tr><td>Fouls against 201</td><td>${game.fouls.length ? game.fouls.map((f) => `${f.kind} ${f.rule}`).join(', ') + ` (${game.fouls.reduce((a, f) => a + f.pts, 0)} pts)` : 'none'}</td></tr></table>`;
     ui.results.hidden = false;
   }
 
   let camYaw = 0;
+  let camFlip = false; // false: third-person camera on the intake side
+  const hubs = [hubCenter(BLUE), hubCenter(RED)];
+  const inHub = (x, z) => hubs.some((h) => Math.abs(x - h.x) < 1.0 && Math.abs(z - h.z) < 1.0);
   function updateCamera(dt) {
     if (camera.userData.freeze) return; // debugging: hold a hand-placed camera
-    const p = robot.position(tmp);
+    const p = tmp.copy(robot.root.position); // the drawn (blended) pose, so the camera never jitters against the model
     const allianceSign = settings.alliance === BLUE ? -1 : 1;
     const view = state === 'menu' ? settings.station : camIndex;
     const mode = view < THIRD ? 0 : view === THIRD ? 1 : 2;
@@ -433,8 +462,20 @@ async function init() {
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
       camYaw += d * (1 - Math.exp(-dt * 2.5));
-      camPos.set(p.x - Math.cos(camYaw) * 3.4, 2.0, p.z + Math.sin(camYaw) * 3.4);
-      camLook.set(p.x + Math.cos(camYaw) * 2.0, 0.4, p.z - Math.sin(camYaw) * 2.0);
+      // default: out past the intake, looking back over the robot toward the shooter (which fires
+      // out the back), so a HUB shot never puts the camera inside the HUB. Flip for the other side.
+      const dir = camFlip ? -1 : 1; // +1: camera on the intake side
+      const cx = Math.cos(camYaw) * dir, cz = -Math.sin(camYaw) * dir;
+      let dist = 2.3;
+      // keep the camera out of the HUBs and off the walls: pull it in until the spot is clear
+      for (; dist > 0.8; dist -= 0.1) {
+        const x = p.x + cx * dist, z = p.z + cz * dist;
+        if (Math.abs(x) > HALF_L - 0.1 || Math.abs(z) > HALF_W - 0.1) continue;
+        if (inHub(x, z)) continue;
+        break;
+      }
+      camPos.set(p.x + cx * dist, 1.35, p.z + cz * dist);
+      camLook.set(p.x - cx * 1.6, 0.35, p.z - cz * 1.6);
     } else {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
@@ -447,7 +488,35 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup }; // handy for debugging in the console
+}
+
+/** Load the converted official field CAD, if it was built. Returns true when it's in the scene. */
+async function loadFieldCad(scene) {
+  const url = `${import.meta.env.BASE_URL}models/field.glb`;
+  try {
+    const head = await fetch(url, { method: 'HEAD' });
+    if (!head.ok || (head.headers.get('content-type') || '').includes('text/html')) return false;
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    const gltf = await loader.loadAsync(url);
+    const solid = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.1, roughness: 0.8 });
+    gltf.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      if (o.material?.name === 'field_clear') {
+        o.material = new THREE.MeshStandardMaterial({ color: 0xcfe0f2, transparent: true, opacity: 0.16, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false });
+      } else {
+        o.material = solid;
+        o.receiveShadow = true;
+        o.castShadow = true;
+      }
+    });
+    scene.add(gltf.scene);
+    return true;
+  } catch (e) {
+    console.warn('field CAD not loaded', e);
+    return false;
+  }
 }
 
 /** Load the converted team CAD if it exists; keep the placeholder robot otherwise. */

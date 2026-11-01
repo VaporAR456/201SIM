@@ -37,7 +37,12 @@ export const ROBOT_201 = {
   // Driver feel
   // Expanding hopper (the agitator): out 12in to intake; while shooting it cycles between
   // 12in out (held 1s) and 4in in (held 0.375s) at up to 30 in/s, stirring FUEL into the indexer
-  hopper: { outIn: 12, inIn: -4, outHold: 1.0, inHold: 0.375, maxSpeedInPerS: 30 },
+  hopper: {
+    outIn: 12, inIn: -4, outHold: 1.0, inHold: 0.375, maxSpeedInPerS: 30,
+    // collision shape of the hopper, robot frame (x forward from center, meters): floor height,
+    // front of the shooter tower, inside half-width, side plate top, front wall top, net height
+    box: { floorY: 0.10, rearX: -0.05, halfW: 0.335, wallTop: 0.45, frontTop: 0.27, netY: 0.55 },
+  },
 
   // Shooter. facing: -1 shoots out the back of the robot (where the Kicker & Shooter sits in
   // the CAD), +1 out the front. Angles are hood angles above horizontal.

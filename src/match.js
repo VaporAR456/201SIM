@@ -2,10 +2,13 @@
 // active), four 25s SHIFTS where the HUBs take turns being active, and a 30s END GAME (both
 // active). The alliance that scored more FUEL in AUTO has its HUB inactive in SHIFT 1.
 // FUEL counts for 1 point in an active HUB, and up to 3 seconds after it turns inactive.
+// Between AUTO and TELEOP robots are disabled for 3 seconds while AUTO scoring finishes, and
+// FUEL still counts for 3 seconds after the match timer hits 0:00.
 import { BLUE, RED } from './constants.js';
 
 export const PHASES = [
   { name: 'AUTO', len: 20 },
+  { name: 'AUTO DONE', len: 3, disabled: true }, // robots disabled; AUTO FUEL still counting
   { name: 'TRANSITION', len: 10 },
   { name: 'SHIFT 1', len: 25, shift: 1 },
   { name: 'SHIFT 2', len: 25, shift: 2 },
@@ -28,6 +31,18 @@ export class Match {
     this.firstInactive = null; // decided when AUTO ends
     this.lastActive = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;
+    this.overT = 0;
+  }
+
+  /** True while the robot is disabled (the pause between AUTO and TELEOP, or after the match). */
+  get disabled() {
+    return this.on && (this.over || !!this.phase().disabled);
+  }
+
+  /** Seconds left in TELEOP (2:20 at the start of the TRANSITION SHIFT). */
+  teleopLeft() {
+    const before = PHASES[0].len + PHASES[1].len;
+    return Math.max(0, PHASES.reduce((a, p) => a + p.len, 0) - Math.max(before, this.t));
   }
 
   phase() {
@@ -42,7 +57,7 @@ export class Match {
   isActive(alliance) {
     if (!this.on) return true;
     const p = this.phase();
-    if (!p.shift) return p.name !== 'MATCH OVER';
+    if (!p.shift) return p.name !== 'MATCH OVER';  // AUTO, AUTO DONE, TRANSITION, END GAME
     const inactiveFirst = this.firstInactive ?? RED;
     // odd shifts: the AUTO winner's HUB is off; even shifts: the other one is
     const off = p.shift % 2 === 1 ? inactiveFirst : other(inactiveFirst);
@@ -51,10 +66,12 @@ export class Match {
 
   /** Advance the clock. Returns true on the frame the match ends. */
   update(dt) {
-    if (!this.on || this.over) return false;
-    const wasAuto = this.phase().name === 'AUTO';
+    if (!this.on) return false;
+    if (this.over) { this.overT += dt; return false; }
+    const autoNames = ['AUTO', 'AUTO DONE'];
+    const wasAuto = autoNames.includes(this.phase().name);
     this.t += dt;
-    if (wasAuto && this.phase().name !== 'AUTO') {
+    if (wasAuto && !autoNames.includes(this.phase().name)) {
       // a tie is settled at random, like the field's coin flip
       const b = this.autoFuel[BLUE], r = this.autoFuel[RED];
       this.firstInactive = b > r ? BLUE : r > b ? RED : (Math.random() < 0.5 ? BLUE : RED);
@@ -67,11 +84,16 @@ export class Match {
   /** FUEL went into a HUB: does it count? */
   scored(alliance) {
     if (!this.on) { this.points[alliance]++; return true; }
-    if (this.over) return false;
+    // the HUB keeps counting for 3 seconds after the timer reaches 0:00
+    if (this.over) {
+      if (this.overT > GRACE) return false;
+      this.points[alliance]++;
+      return true;
+    }
     const counts = this.isActive(alliance) || this.t - this.lastActive[alliance] <= GRACE;
     if (counts) {
       this.points[alliance]++;
-      if (this.phase().name === 'AUTO') this.autoFuel[alliance]++;
+      if (['AUTO', 'AUTO DONE'].includes(this.phase().name)) this.autoFuel[alliance]++;
     }
     return counts;
   }

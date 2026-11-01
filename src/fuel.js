@@ -40,6 +40,9 @@ export class Fuel {
     this.tmpQ = new THREE.Quaternion();
     this.tmpP = new THREE.Vector3();
     this.zero = new THREE.Vector3(0, 0, 0);
+    // positions after the last two physics steps, blended when drawing (see Robot.sync)
+    this.prev = new Float32Array(TOTAL * 3);
+    this.cur = new Float32Array(TOTAL * 3);
     this.one = new THREE.Vector3(1, 1, 1);
   }
 
@@ -85,6 +88,7 @@ export class Fuel {
     // fast shots need continuous collision so they can't tunnel through the HUB walls
     b.body.enableCcd(Math.hypot(vx, vy, vz) > 3);
     b.body.wakeUp();
+    b.jump = true; // teleported: don't draw it sliding from where it was
   }
 
   disable(b) {
@@ -98,13 +102,31 @@ export class Fuel {
     return this.balls.find((b) => !b.active) || null;
   }
 
-  /** Copy physics to the instanced mesh. */
-  sync() {
+  /** Remember where every ball is after a physics step. Sleeping balls haven't moved. */
+  snapshot() {
+    const { prev, cur } = this;
+    for (const b of this.balls) {
+      if (!b.active || (b.body.isSleeping() && !b.jump)) continue;
+      const i = b.id * 3;
+      const p = b.body.translation();
+      if (b.jump) { prev[i] = p.x; prev[i + 1] = p.y; prev[i + 2] = p.z; b.jump = false; }
+      else { prev[i] = cur[i]; prev[i + 1] = cur[i + 1]; prev[i + 2] = cur[i + 2]; }
+      cur[i] = p.x; cur[i + 1] = p.y; cur[i + 2] = p.z;
+    }
+  }
+
+  /** Copy physics to the instanced mesh, blended `alpha` of the way from the last step to this one. */
+  sync(alpha = 1) {
+    const { prev, cur } = this;
     for (const b of this.balls) {
       if (b.active) {
-        const p = b.body.translation();
+        const i = b.id * 3;
+        if (b.jump || b.body.isSleeping()) {
+          const p = b.body.translation();
+          prev[i] = cur[i] = p.x; prev[i + 1] = cur[i + 1] = p.y; prev[i + 2] = cur[i + 2] = p.z;
+        }
         const q = b.body.rotation();
-        this.tmpP.set(p.x, p.y, p.z);
+        this.tmpP.set(prev[i] + (cur[i] - prev[i]) * alpha, prev[i + 1] + (cur[i + 1] - prev[i + 1]) * alpha, prev[i + 2] + (cur[i + 2] - prev[i + 2]) * alpha);
         this.tmpQ.set(q.x, q.y, q.z, q.w);
         this.tmpM.compose(this.tmpP, this.tmpQ, this.one);
       } else {

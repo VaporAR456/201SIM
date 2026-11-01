@@ -116,3 +116,7 @@ th { color: var(--muted); font-weight: 600; }
 #gpu-info { color: var(--muted); font-size: 12px; margin: 6px 0 0; } #gpu-info.warn { color: #ffb4a8; font-size: 14px; font-weight: 600; }
 @media (max-width: 1400px) { .hud-left { top: calc(min(66vw, 1100px) * .15 + 36px); } }
 @media (max-width: 900px) { .hud-left { top: calc(96vw * .15 + 36px); } }
+#toast { position: absolute; left: 50%; top: calc(min(66vw, 1100px) * .15 + 40px); transform: translateX(-50%); background: #f5c400; color: #111;
+  font-weight: 800; padding: 8px 16px; border-radius: 6px; opacity: 0; transition: opacity .25s ease; white-space: nowrap; }
+#toast.show { opacity: 1; }
+#toast.info { background: rgba(20,24,28,.85); color: #fff; }

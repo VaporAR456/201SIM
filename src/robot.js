@@ -26,28 +26,71 @@ export class Robot {
     // Free to pitch and roll so it tilts over the BUMPS; the heavy bumpers and belly keep the
     // center of mass low so it settles back instead of tipping.
 
-    // Bumpers: the main collision shape, rounded so it rides up the BUMP ramps
+    // Bumpers: a ring of four rounded strips (rounded so they ride up the BUMP ramps); the
+    // middle is open so FUEL can sit inside the hopper
     const bH = cfg.bumperHeight / 2;
     const r = 0.02;
-    const bumper = RAPIER.ColliderDesc.roundCuboid(L - r, bH - r, W - r, r)
-      .setTranslation(0, cfg.bumperBottom + bH, 0)
+    const t = cfg.bumperThickness / 2;
+    const bumperPart = (hx, hz, x, z) => RAPIER.ColliderDesc.roundCuboid(hx - r, bH - r, hz - r, r)
+      .setTranslation(x, cfg.bumperBottom + bH, z)
       .setFriction(0)
       .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
       .setRestitution(0.05)
       .setDensity(1);
-    // Superstructure: frame-sized, up to the robot's real height (catches the TRENCH arm)
-    const supH = (cfg.height - cfg.bumperBottom - cfg.bumperHeight) / 2;
-    const sup = RAPIER.ColliderDesc.cuboid(cfg.frameLength / 2 - 0.02, supH, cfg.frameWidth / 2 - 0.02)
-      .setTranslation(0, cfg.bumperBottom + cfg.bumperHeight + supH, 0)
-      .setFriction(0)
-      .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
-      .setDensity(0.2);
+    this.colliders = [
+      world.createCollider(bumperPart(L, t, 0, W - t), body),
+      world.createCollider(bumperPart(L, t, 0, -W + t), body),
+      world.createCollider(bumperPart(t, W - 2 * t, L - t, 0), body),
+      world.createCollider(bumperPart(t, W - 2 * t, -L + t, 0), body),
+    ];
+    // The hopper, built from simple boxes so FUEL can roll around inside the robot:
+    // a floor, the shooter/spindexer tower at the back, side plates, and the net on top.
+    const hb = cfg.hopper.box;
+    const solid = (desc, x, y, z, density = 0.4) => world.createCollider(
+      desc.setTranslation(x, y, z).setFriction(0.3).setDensity(density), body);
+    // belly pan / hopper floor
+    solid(RAPIER.ColliderDesc.cuboid(L - 2 * t, 0.02, W - 2 * t), 0, hb.floorY - 0.02, 0, 0.6);
+    // tower at the back (also what hits the TRENCH arm)
+    const towerLen = hb.rearX + L - 2 * t;
+    solid(RAPIER.ColliderDesc.cuboid(towerLen / 2, (cfg.height - hb.floorY) / 2, W - 2 * t), -L + 2 * t + towerLen / 2, (cfg.height + hb.floorY) / 2, 0, 0.6);
+    // side plates
+    // (they reach up to the net, and back into the tower, so there's no gap for FUEL to slip through)
+    const sideH = (hb.netY + 0.04 - hb.floorY) / 2;
+    const sideBack = -L + 2 * t;
+    const sideLen = (L - sideBack) / 2;
+    for (const sz of [-1, 1]) solid(RAPIER.ColliderDesc.cuboid(sideLen, sideH, 0.03), sideBack + sideLen, hb.floorY + sideH, sz * (hb.halfW + 0.03), 0.2);
+    // the net over the fixed part of the hopper (only stops FUEL)
+    const fuelOnly = groups(GROUP.INTAKE, GROUP.FUEL);
+    this.netColliders = [world.createCollider(
+      RAPIER.ColliderDesc.cuboid((L - hb.rearX) / 2, 0.02, hb.halfW + 0.05).setCollisionGroups(fuelOnly)
+        .setTranslation((L + hb.rearX) / 2, hb.netY + 0.02, 0).setDensity(0).setFriction(0.2), body)];
+    // the part that slides out with the intake: front wall, side extensions, more net
+    const ext = 0.42;
+    this.hopperFront = L - 0.1;
+    this.slide = [
+      // low lip at the front: always there
+      { c: world.createCollider(RAPIER.ColliderDesc.cuboid(0.02, (hb.frontTop - hb.floorY) / 2, hb.halfW + 0.05).setCollisionGroups(fuelOnly).setDensity(0).setFriction(0.3), body),
+        dx: 0.02, y: (hb.frontTop + hb.floorY) / 2, z: 0 },
+      ...[-1, 1].map((sz) => ({
+        c: world.createCollider(RAPIER.ColliderDesc.cuboid(ext / 2, sideH, 0.03).setCollisionGroups(fuelOnly).setDensity(0).setFriction(0.3), body),
+        dx: -ext / 2, y: hb.floorY + sideH, z: sz * (hb.halfW + 0.03) })),
+      { c: world.createCollider(RAPIER.ColliderDesc.cuboid(ext / 2, 0.02, hb.halfW + 0.05).setCollisionGroups(fuelOnly).setDensity(0).setFriction(0.2), body),
+        dx: -ext / 2, y: hb.netY + 0.02, z: 0, net: true },
+      // a floor under the slid-out part
+      { c: world.createCollider(RAPIER.ColliderDesc.cuboid(ext / 2, 0.02, hb.halfW + 0.05).setCollisionGroups(fuelOnly).setDensity(0).setFriction(0.3), body),
+        dx: -ext / 2, y: hb.floorY - 0.02, z: 0 },
+    ];
+    this.netColliders.push(this.slide[3].c);
+    // above the lip, the intake opening: a one-way door. FUEL the rollers are feeding passes
+    // through it (see Game.collect); FUEL already inside can't fall back out the front.
+    this.gate = { c: world.createCollider(RAPIER.ColliderDesc.cuboid(0.02, (hb.netY - hb.frontTop) / 2, hb.halfW + 0.05).setCollisionGroups(groups(GROUP.GATE, GROUP.FUEL)).setDensity(0).setFriction(0.3), body),
+      dx: 0.02, y: (hb.netY + hb.frontTop) / 2, z: 0 };
+    this.slide.push(this.gate);
     // Skids under the frame, so the body rests on the carpet at bumper height
     const skid = RAPIER.ColliderDesc.ball(cfg.bumperBottom)
       .setFriction(0)
       .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
       .setDensity(0.1);
-    this.colliders = [world.createCollider(bumper, body), world.createCollider(sup, body)];
     for (const [mx, mz] of cfg.modules) {
       world.createCollider(skid.setTranslation(mx, cfg.bumperBottom, mz), body);
     }
@@ -180,11 +223,19 @@ export class Robot {
    */
   setHopper(pos, out) {
     const off = (pos - out) * 0.0254;
+    // the hopper's front wall rides with the intake: at the front bumper when fully out
+    this.hopperFront = this.halfL + off - 0.1; // the back of the intake
+    for (const s of this.slide) s.c.setTranslationWrtParent({ x: this.hopperFront + s.dx, y: s.y, z: s.z });
     if (this.intakeNode) this.intakeNode.position.x = this.intakeBase + off;
     if (this.intakeCollider) {
       this.intakeCollider.setTranslationWrtParent({ x: this.intakeX + off, y: this.intakeY, z: 0 });
       this.intakeCollider.setEnabled(pos > out / 2);
     }
+  }
+
+  /** The net stops FUEL leaving the top of the hopper, until it tears. */
+  setNet(intact) {
+    for (const c of this.netColliders) c.setEnabled(intact);
   }
 
   /** Spin the spindexer while it feeds the shooter. */
@@ -263,6 +314,7 @@ export class Robot {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.cmd = { vx: 0, vz: 0, omega: 0 };
+    this.snapshot(true);
   }
 
   yaw() {
@@ -314,11 +366,26 @@ export class Robot {
   }
 
   /** Copy the physics pose onto the model and animate the swerve modules. */
-  sync(dt) {
+  /** Remember the pose after each physics step, so drawing can blend between the last two. */
+  snapshot(jump = false) {
     const p = this.body.translation();
     const q = this.body.rotation();
-    this.root.position.set(p.x, p.y, p.z);
-    this.root.quaternion.set(q.x, q.y, q.z, q.w);
+    if (!this.curPos) { this.curPos = new THREE.Vector3(); this.curQ = new THREE.Quaternion(); this.prevPos = new THREE.Vector3(); this.prevQ = new THREE.Quaternion(); jump = true; }
+    this.prevPos.copy(this.curPos);
+    this.prevQ.copy(this.curQ);
+    this.curPos.set(p.x, p.y, p.z);
+    this.curQ.set(q.x, q.y, q.z, q.w);
+    if (jump) { this.prevPos.copy(this.curPos); this.prevQ.copy(this.curQ); }
+  }
+
+  /**
+   * Update the model. `alpha` (0..1) is how far the clock is between the last two physics steps:
+   * drawing the blend keeps motion smooth on screens faster than the 60 Hz physics.
+   */
+  sync(dt, alpha = 1) {
+    if (!this.curPos) this.snapshot(true);
+    this.root.position.lerpVectors(this.prevPos, this.curPos, alpha);
+    this.root.quaternion.slerpQuaternions(this.prevQ, this.curQ, alpha);
 
     // Module states from chassis velocity in the robot frame
     const yaw = this.yaw();

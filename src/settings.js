@@ -23,6 +23,10 @@ export const SETTING_DEFS = {
     label: 'Hopper capacity', unit: ' FUEL', min: 10, max: 80, step: 1, def: 40,
     help: 'How many FUEL the robot can hold.',
   },
+  freeShotDist: {
+    label: 'Free shot distance', unit: ' m', min: 1, max: 10, step: 0.5, def: 3,
+    help: 'Free shoot fires straight out of the shooter with no auto-aim, sized to land this far away.',
+  },
   showTrajectory: {
     label: 'Show aim line', type: 'bool', def: true,
     help: 'Draw where an auto shot or pass will go while you hold the button.',

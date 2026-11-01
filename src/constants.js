@@ -93,5 +93,6 @@ export const GROUP = {
   TERRAIN: 0x0002, // BUMPS
   INTAKE: 0x0004,
   FUEL: 0x0008,
+  GATE: 0x0010, // the hopper's front: FUEL being fed by the intake passes through it, nothing else does
 };
 export const groups = (member, filter = 0xffff) => (member << 16) | filter;

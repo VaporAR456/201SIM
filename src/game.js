@@ -1,7 +1,7 @@
 // The robot's game mechanisms: expanding hopper (the agitator), intake, spindexer feed and
 // shooter, plus HUB scoring. Tuning lives in robotConfig.js (hardware) and settings.js (player).
 import * as THREE from 'three';
-import { IN, HALF_W, HUB, BLUE, RED, fieldToWorld } from './constants.js';
+import { IN, HALF_L, HALF_W, HUB, BLUE, RED, fieldToWorld, GROUP, groups, ALLIANCE_ZONE_DEPTH } from './constants.js';
 import { FUEL_RADIUS, hubCenter } from './fuel.js';
 
 const G = 9.81;
@@ -26,6 +26,8 @@ export class Game {
     this.fireT = 0;
     this.exitQueue = [];
     this.aim = null;
+    this.clock = 0;
+    this.alliance = BLUE;
 
     // aim line
     const g = new THREE.BufferGeometry();
@@ -35,24 +37,8 @@ export class Game {
     this.aimLine.visible = false;
     scene.add(this.aimLine);
 
-    // FUEL you can see in the hopper, and the net over it
-    const hb = this.cfg.hopperBox;
-    this.slots = [];
-    const sp = FUEL_RADIUS * 2 + 0.004;
-    const nx = Math.max(1, Math.floor((hb.x[1] - hb.x[0]) / sp));
-    const nz = Math.max(1, Math.floor((hb.z[1] - hb.z[0]) / sp));
-    for (let layer = 0; this.slots.length < 100; layer++) {
-      for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
-        const off = layer % 2 ? sp / 2 : 0; // stack in the gaps of the layer below
-        this.slots.push([hb.x[0] + sp / 2 + i * sp + off * 0.5, hb.y0 + FUEL_RADIUS + layer * sp * 0.82, hb.z[0] + sp / 2 + k * sp + off * 0.5]);
-      }
-    }
-    this.slotNow = [];
-    this.heldMesh = new THREE.InstancedMesh(fuel.mesh.geometry, fuel.mesh.material, this.slots.length);
-    this.heldMesh.castShadow = true;
-    this.heldMesh.count = 0;
-    robot.root.add(this.heldMesh);
-    this.heldMatrix = new THREE.Matrix4();
+    this.inside = []; // FUEL bodies sitting in the hopper right now
+    this.insideLocal = []; // and where, in the robot's frame (for drawing the net)
 
     // the net: a grid of cords that sags, bulges over a full hopper and wobbles as the robot moves
     const NU = 14, NV = 10;
@@ -86,13 +72,32 @@ export class Game {
     this.spillT = 0;
     if (this.wob) Object.assign(this.wob, { y: 0, vy: 0, z: 0, vz: 0, x: 0, vx: 0 });
     this.score = { [BLUE]: 0, [RED]: 0 };
+    this.fouls = [];
+    this.ejected = 0;
+    this.lastG407 = -99;
     this.shots = 0;
     this.missedInactive = 0;
     this.exitQueue = [];
     this.fuel.reset();
-    // preloaded FUEL ride in the robot as a count; those balls stay switched off
-    this.held = Math.min(this.cfg.preload, this.capacity);
-    this.hopperPos = 0;
+    this.robot.setNet(true);
+    // start with the hopper out just far enough for the preload
+    const pre = Math.min(this.cfg.preload, this.capacity);
+    this.hopperPos = Math.max(0, this.cfg.hopper.outIn + (this.cfg.hopper.box.rearX + Math.ceil(pre / 11) * 0.165 + 0.01 + 0.1 - this.robot.halfL) / 0.0254);
+    this.robot.setHopper(this.hopperPos, this.cfg.hopper.outIn);
+    // preloaded FUEL: real balls dropped into the hopper
+    const hb = this.cfg.hopper.box;
+    const n = Math.min(this.cfg.preload, this.capacity);
+    for (let i = 0; i < n; i++) {
+      const b = this.fuel.takeSpare();
+      if (!b) break;
+      const lx = hb.rearX + 0.085 + Math.floor(i / 12) * 0.16;
+      const lz = -hb.halfW + 0.085 + (i % 4) * 0.155;
+      const ly = hb.floorY + 0.085 + (Math.floor(i / 4) % 3) * 0.16;
+      const w = this.toWorld(lx, ly, lz);
+      this.fuel.enable(b, w.x, w.y, w.z, 0, 0, 0);
+      b.body.enableCcd(true);
+    }
+    this.countInside();
   }
 
   /**
@@ -100,6 +105,7 @@ export class Game {
    * the driver's while auto-aiming, or null.
    */
   update(input, dt, alliance) {
+    this.alliance = alliance;
     const cfg = this.cfg;
     const hop = cfg.hopper;
     const shooting = input.held('autoShoot') || input.held('autoPass') || input.held('manualShoot');
@@ -114,16 +120,33 @@ export class Game {
       this.agitateT = 0;
       if (input.held('intake')) target = hop.outIn;
     }
+    // a full hopper can't be pulled all the way in: the FUEL takes up the room
+    const hb = hop.box;
+    // the front wall can't slide back past the frontmost ball (FUEL can't be crushed), and a pile
+    // needs about one ball-width of hopper per 11 FUEL (4 across, 3 high)
+    let frontBall = -Infinity;
+    for (const l of this.insideLocal) frontBall = Math.max(frontBall, l[0]);
+    const needLen = this.held ? Math.ceil(this.held / 11) * 0.165 + 0.01 : 0;
+    const minFront = Math.max(hb.rearX + needLen, frontBall + FUEL_RADIUS + 0.01);
+    const minPos = hop.outIn + (minFront + 0.1 - this.robot.halfL) / 0.0254;
+    target = Math.max(target, Math.min(hop.outIn, minPos));
     const step = hop.maxSpeedInPerS * dt;
     this.hopperPos += Math.max(-step, Math.min(step, target - this.hopperPos));
     this.robot.setHopper(this.hopperPos, hop.outIn);
 
     // ---------------------------------------------------------- intake
+    this.countInside();
+    // the agitator also shakes the pile a little so FUEL finds the spindexer
+    if (this.agitateT > 0 && Math.random() < dt * 8 && this.inside.length) {
+      const b = this.inside[Math.floor(Math.random() * this.inside.length)];
+      b.body.applyImpulse({ x: (Math.random() - 0.5) * 0.08, y: 0.12, z: (Math.random() - 0.5) * 0.08 }, true);
+    }
     // The net: a full hopper won't take more. Keep ramming FUEL into it and you can cram in a
     // couple extra, but hold it there too long and the net tears off.
     const net = this.cfg.net;
     let pushing = false;
-    if (input.held('intake') && this.hopperPos > hop.outIn - 2) {
+    const rollers = input.held('intake') && this.hopperPos > hop.outIn - 2;
+    if (rollers) {
       const full = this.held >= this.capacity;
       const overLimit = this.capacity + (this.netBroken ? 0 : net.cramExtra);
       const waiting = this.collect(full ? Math.min(overLimit, this.capacity + Math.floor(this.strain / net.cramEvery)) : this.capacity);
@@ -135,14 +158,6 @@ export class Game {
     } else {
       this.strain = Math.max(0, this.strain - dt * net.recover);
     }
-    // a torn net drops FUEL when the robot bounces around
-    if (this.netBroken && this.held > 0) {
-      this.spillT -= dt;
-      const v = this.robot.body.angvel();
-      const rough = Math.hypot(v.x, v.z) > 0.6 || this.robot.speed() > 3.5;
-      if (rough && this.spillT <= 0 && this.held > this.capacity * 0.6) { this.spill(1); this.spillT = 0.5; }
-    }
-
     // ---------------------------------------------------------- aiming and shooting
     let turn = null;
     this.aim = null;
@@ -165,7 +180,9 @@ export class Game {
       this.fireT = 1 / this.settings.fireRate;
     }
 
+    this.clock += dt;
     this.scoreCheck(dt);
+    this.returnStrays(dt);
     return turn;
   }
 
@@ -173,9 +190,15 @@ export class Game {
   breakNet() {
     this.netBroken = true;
     this.strain = 0;
-    // the net tears off the front and flops over the back; the overfill falls out
+    // the net tears off the front and flops over the back; FUEL on top of the pile pops out
     this.wob.vy += 2;
-    this.spill(Math.max(0, this.held - this.capacity) + 3);
+    this.robot.setNet(false);
+    const top = [...this.inside].sort((a, b) => b.body.translation().y - a.body.translation().y);
+    const pop = Math.max(0, this.held - this.capacity) + 3;
+    for (let i = 0; i < pop && i < top.length; i++) {
+      const a = Math.random() * Math.PI * 2;
+      top[i].body.applyImpulse({ x: Math.cos(a) * 0.25, y: 0.45, z: Math.sin(a) * 0.25 }, true);
+    }
   }
 
   /** Drop FUEL out of the top of the robot onto the carpet. */
@@ -191,27 +214,93 @@ export class Game {
     }
   }
 
-  /** Pull FUEL in the intake's reach into the hopper, up to `limit`. Returns how many were left waiting. */
+  /** Robot-frame point to world. */
+  toWorld(lx, ly, lz) {
+    const p = this.robot.body.translation();
+    const q = this.robot.body.rotation();
+    const v = new THREE.Vector3(lx, ly, lz).applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w));
+    return { x: p.x + v.x, y: p.y + v.y, z: p.z + v.z };
+  }
+
+  /** Let a ball the intake is feeding pass through the hopper's front door (or not). */
+  setFeeding(b, on) {
+    b.feeding = on;
+    b.body.collider(0).setCollisionGroups(groups(GROUP.FUEL, on ? 0xffff & ~GROUP.GATE : 0xffff));
+  }
+
+  /** Find the FUEL sitting in the hopper (by position, in the robot's frame). */
+  countInside() {
+    const r = this.robot;
+    const p = r.body.translation();
+    const q = r.body.rotation();
+    this._qi = (this._qi || new THREE.Quaternion()).set(-q.x, -q.y, -q.z, q.w);
+    this._qf = this._qf || new THREE.Quaternion();
+    const v = this._v || (this._v = new THREE.Vector3());
+    const hb = this.cfg.hopper.box;
+    const front = r.hopperFront;
+    this.inside.length = 0;
+    this.insideLocal.length = 0;
+    for (const b of this.fuel.balls) {
+      if (!b.active) continue;
+      const t = b.body.translation();
+      const dx = t.x - p.x, dz = t.z - p.z;
+      if (dx * dx + dz * dz > 1.0) {
+        if (b.inRobot) { b.inRobot = false; b.body.enableCcd(false); }
+        if (b.feeding) this.setFeeding(b, false);
+        continue;
+      }
+      v.set(dx, t.y - p.y, dz).applyQuaternion(this._qi);
+      // Containment: a held ball squeezed partway through a side plate (a stiff solver limit
+      // when 30+ FUEL lean on it in a fast spin) goes back in, the way the real plate would hold it
+      if (b.inRobot && !this.netBroken && Math.abs(v.z) > hb.halfW - FUEL_RADIUS * 0.5 && Math.abs(v.z) < hb.halfW + 0.2
+          && v.x > hb.rearX && v.x < front && v.y < hb.netY) {
+        const lz = Math.sign(v.z) * (hb.halfW - FUEL_RADIUS - 0.005);
+        const back = v.clone().setZ(lz).applyQuaternion(this._qf.set(q.x, q.y, q.z, q.w));
+        b.body.setTranslation({ x: p.x + back.x, y: p.y + back.y, z: p.z + back.z }, true);
+        const lv = r.body.linvel();
+        b.body.setLinvel({ x: lv.x, y: lv.y, z: lv.z }, true);
+        v.z = lz;
+      }
+      const inside = v.x > hb.rearX - 0.08 && v.x < front + 0.02 && Math.abs(v.z) < hb.halfW + 0.03 && v.y > hb.floorY - 0.02 && v.y < hb.netY + 0.15;
+      if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(inside); }
+      // a fed ball that is well inside (or that missed) shuts the one-way door behind it
+      if (b.feeding && (v.x < front - 0.01 || v.x > front + 0.5 || v.y > hb.netY + 0.2)) this.setFeeding(b, false);
+      if (inside) { this.inside.push(b); this.insideLocal.push([v.x, v.y, v.z]); }
+    }
+    this.held = this.inside.length;
+  }
+
+  /**
+   * Run the intake rollers: FUEL in front of the intake gets pulled up and over into the hopper,
+   * up to `limit`. Returns how many were left waiting at a full hopper.
+   */
   collect(limit) {
     let waiting = 0;
     const r = this.robot;
     const p = r.body.translation();
     const yaw = r.yaw();
     const c = Math.cos(yaw), s = Math.sin(yaw);
-    const x0 = r.halfL - 0.04;
-    const x1 = r.halfL + this.cfg.intakeReach + FUEL_RADIUS;
+    const front = r.hopperFront;
+    const x0 = front - 0.03;
+    const x1 = front + this.cfg.intakeReach + FUEL_RADIUS;
     const hw = this.cfg.intakeWidth / 2;
+    const rv = r.body.linvel();
+    let pulled = 0;
     for (const b of this.fuel.balls) {
-      if (!b.active) continue;
+      if (!b.active || b.inRobot) continue;
       const q = b.body.translation();
-      if (q.y > 0.35) continue;
+      if (q.y - p.y > 0.4) continue;
       const dx = q.x - p.x, dz = q.z - p.z;
       const lx = dx * c - dz * s;
       const lz = dx * s + dz * c;
       if (lx > x0 && lx < x1 && Math.abs(lz) < hw) {
-        if (this.held >= limit) { waiting++; continue; }
-        this.fuel.disable(b);
-        this.held++;
+        if (this.held + pulled >= limit) { waiting++; continue; }
+        pulled++;
+        // rollers: back over the front wall and up, steering toward the middle of the hopper
+        const back = -2.2, up = q.y - p.y < 0.24 ? 2.4 : 0.6, side = -lz * 3;
+        b.body.setLinvel({ x: rv.x + back * c + side * s, y: up, z: rv.z - back * s + side * c }, true);
+        b.body.enableCcd(true);
+        this.setFeeding(b, true);
       }
     }
     return waiting;
@@ -290,14 +379,25 @@ export class Game {
     const sh = this.cfg.shooter;
     const yaw = this.robot.yaw();
     const f = sh.facing;
-    const th = this.hoodAngle(sh.manualDist);
-    const spd = Math.min(Game.speedFor(sh.manualDist, sh.aimHeight - this.exitPoint().y, th), sh.maxExitSpeed);
-    return { kind: 'manual', th, spd, ux: f * Math.cos(yaw), uz: -f * Math.sin(yaw), e: this.exitPoint(), ready: true, d: sh.manualDist };
+    const d = this.settings.freeShotDist ?? sh.manualDist;
+    const th = this.hoodAngle(d);
+    const boost = d > 6 ? this.settings.passPower / 100 : 1;
+    const spd = Math.min(Game.speedFor(d, 0.15 - this.exitPoint().y, th), sh.maxExitSpeed * boost);
+    return { kind: 'manual', th, spd, ux: f * Math.cos(yaw), uz: -f * Math.sin(yaw), e: this.exitPoint(), ready: true, d };
+  }
+
+  /** The spindexer feeds whichever ball in the hopper is nearest the shooter tower. */
+  feedBall() {
+    let best = null, bx = Infinity;
+    this.inside.forEach((b, i) => { const x = this.insideLocal[i][0]; if (x < bx) { bx = x; best = b; } });
+    // nothing close enough to the spindexer yet: wait for the agitator to move the pile
+    return bx < this.cfg.hopper.box.rearX + 0.3 ? best : null;
   }
 
   launch(aim) {
-    const b = this.fuel.takeSpare();
+    const b = this.feedBall();
     if (!b) return;
+    b.inRobot = false;
     const sh = this.cfg.shooter;
     const e = this.exitPoint();
     const v = this.robot.body.linvel();
@@ -310,8 +410,61 @@ export class Game {
     const uz = aim.ux * sy + aim.uz * cy;
     const h = spd * Math.cos(thN);
     this.fuel.enable(b, e.x, e.y, e.z, ux * h + v.x, spd * Math.sin(thN), uz * h + v.z);
+    b.shot = { outside: !this.inAllianceZone(), t: this.clock };
     this.held--;
+    const k = this.inside.indexOf(b);
+    if (k >= 0) { this.inside.splice(k, 1); this.insideLocal.splice(k, 1); }
     this.shots = (this.shots || 0) + 1;
+  }
+
+  // ------------------------------------------------------------ rules
+  /** Are the robot's BUMPERS at least partly inside its ALLIANCE ZONE? */
+  inAllianceZone() {
+    const p = this.robot.body.translation();
+    const yaw = this.robot.yaw();
+    const reach = Math.abs(Math.cos(yaw)) * this.robot.halfL + Math.abs(Math.sin(yaw)) * this.robot.halfW;
+    const line = HALF_L - ALLIANCE_ZONE_DEPTH; // zone boundary, distance from center
+    return this.alliance === BLUE ? p.x - reach < -line : p.x + reach > line;
+  }
+
+  /** Call a foul on 201: points go to the other alliance (only in a match). */
+  foul(kind, rule, why) {
+    const pts = kind === 'MAJOR' ? 15 : 5;
+    const opp = this.alliance === BLUE ? RED : BLUE;
+    const live = this.match?.on && !this.match.over;
+    if (live) { this.score[opp] += pts; this.match.points[opp] += pts; this.fouls.push({ kind, rule, why, pts }); }
+    this.onFoul?.(`${kind} FOUL ${rule}: ${why}${live ? ` (+${pts} ${opp.toUpperCase()})` : ''}`);
+  }
+
+  /**
+   * FUEL that leaves the field is thrown back in near where it went out, the way FIELD STAFF do
+   * it. If 201 shot it out, that's G405 (a MINOR FOUL, MAJOR if it keeps happening).
+   */
+  returnStrays(dt) {
+    this.strayScan = (this.strayScan || 0) + dt;
+    if (this.strayScan < 0.25) return;
+    const step = this.strayScan;
+    this.strayScan = 0;
+    for (const b of this.fuel.balls) {
+      if (!b.active) continue;
+      const q = b.body.translation();
+      const out = Math.abs(q.x) > HALF_L + 0.05 || Math.abs(q.z) > HALF_W + 0.05 || q.y < -0.3;
+      if (!out) { b.outT = 0; continue; }
+      if (!b.outT && b.shot && this.clock - b.shot.t < 6) {
+        this.ejected = (this.ejected || 0) + 1;
+        this.foul(this.ejected > 1 ? 'MAJOR' : 'MINOR', 'G405', 'FUEL launched out of the field');
+        b.shot = null;
+      }
+      b.outT = (b.outT || 0) + step;
+      if (b.outT < 2.5) continue;
+      b.outT = 0;
+      // toss it back over the wall from about where it went out
+      const x = Math.max(-HALF_L + 0.5, Math.min(HALF_L - 0.5, q.x));
+      const z = Math.max(-HALF_W + 0.5, Math.min(HALF_W - 0.5, q.z));
+      const ix = Math.abs(q.x) > HALF_L ? -Math.sign(q.x) : 0;
+      const iz = Math.abs(q.z) > HALF_W ? -Math.sign(q.z) : 0;
+      this.fuel.enable(b, x - ix * 0.45, 1.1, z - iz * 0.45, ix * 1.6 + (Math.random() - 0.5) * 0.6, 1.5, iz * 1.6 + (Math.random() - 0.5) * 0.6);
+    }
   }
 
   // ------------------------------------------------------------ scoring
@@ -326,6 +479,12 @@ export class Game {
         const dx = q.x - h.x, dz = q.z - h.z;
         // inside the hexagon (checked as its inscribed circle plus the six corners' margin)
         if (Math.hypot(dx, dz) < apo) {
+          // G407: launched into your own HUB from outside your ALLIANCE ZONE
+          if (b.shot?.outside && al === this.alliance && this.clock - this.lastG407 > 3) {
+            this.lastG407 = this.clock;
+            this.foul('MAJOR', 'G407', 'scored from outside your ALLIANCE ZONE');
+          }
+          b.shot = null;
           if (this.match ? this.match.scored(al) : true) this.score[al]++;
           else this.missedInactive = (this.missedInactive || 0) + 1;
           this.fuel.disable(b);
@@ -348,25 +507,8 @@ export class Game {
 
   // ------------------------------------------------------------ FUEL in the hopper
   drawHeld(time) {
-    const n = Math.min(this.held, this.slots.length);
-    const shake = this.agitateT > 0 ? 0.012 : 0;
-    // the hopper is shorter when slid in: squeeze the pile toward the shooter and stack it higher
-    const x0 = this.cfg.hopperBox.x[0];
-    const slide = this.robot.intakeNode ? this.robot.intakeNode.position.x - this.robot.intakeBase : 0;
-    const f = Math.max(0.62, 1 + slide / (this.cfg.hopperBox.x[1] - x0));
-    const lift = (1 - f) * 0.06;
-    for (let i = 0; i < n; i++) {
-      const [sx, sy, z] = this.slots[i];
-      const x = x0 + (sx - x0) * f;
-      const y = sy + lift * ((sy - this.cfg.hopperBox.y0) / 0.13);
-      this.slotNow[i] = [x, y, z];
-      const j = shake ? Math.sin(time * 23 + i * 1.7) * shake : 0;
-      this.heldMatrix.makeTranslation(x + j, y + Math.abs(j), z - j);
-      this.heldMesh.setMatrixAt(i, this.heldMatrix);
-    }
-    this.heldMesh.count = n;
-    this.heldMesh.instanceMatrix.needsUpdate = true;
-    this.drawNet(time, n);
+    // the FUEL itself is drawn with the rest; just lay the net over it
+    this.drawNet(time, this.insideLocal.length);
   }
 
   /** Lay the net over the hopper: tied at its edges, sagging when slack, pushed up by FUEL, wobbling. */
@@ -405,7 +547,7 @@ export class Game {
     const slack = Math.max(0, 1 - len / (R.frontX - R.rearX));
     const sag = 0.035 + slack * 0.16;
     const r = FUEL_RADIUS;
-    const held = this.slotNow;
+    const held = this.insideLocal;
     for (let i = 0; i < NU; i++) {
       const u = i / (NU - 1);
       for (let k = 0; k < NV; k++) {

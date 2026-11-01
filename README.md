@@ -25,10 +25,11 @@ The default layout matches MoSim's REBUILT keybinds. Everything can be remapped 
 | Intake | LT | Shift |
 | Auto shoot | RT | K |
 | Auto pass | RB | E |
-| Manual shoot | LB | Q |
+| Free shoot (no auto-aim) | LB | Q |
 | Climb | D-pad down | C |
 | Robot special 1 / 2 / 3 | Y / X / B | V / I / O |
 | Swap camera (driver stations 1-3, third person, overhead; also in the pause menu) | Right stick click | Space |
+| Third person: view from the intake side / the shooter side | D-pad right | T |
 | Field / robot relative | D-pad left | F |
 | Reset gyro | D-pad up | G |
 | Pause | Menu | Esc |
