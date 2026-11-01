@@ -204,3 +204,4 @@ th { color: var(--muted); font-weight: 600; }
 .mm-nav button.padfocus { transform: translateX(6px); }
 input[type=range].padfocus, input[type=checkbox].padfocus { outline-offset: 4px; }
 body:has(#pause:not([hidden])) #countdown { display: none; }
+.mm-opt[hidden] { display: none; }

@@ -10,6 +10,7 @@ import { buildArena } from './arena.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
 import { Humans } from './humans.js';
+import { AIPlayers, resetAiMemory } from './ai.js';
 import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
@@ -58,6 +59,9 @@ const settings = { alliance: BLUE, station: 1, mode: 'match', cam: 'ds' };
 try { settings.cam = localStorage.getItem('201sim.startCam') || 'ds'; } catch { /* default */ }
 try { settings.preload = localStorage.getItem('201sim.preload') !== 'off'; } catch { settings.preload = true; }
 try { settings.spawn = localStorage.getItem('201sim.spawn') || 'station'; } catch { settings.spawn = 'station'; }
+// Play vs AI: robots per alliance ("off", or "1v1".."3v3") and the AI's skill
+try { settings.vs = localStorage.getItem('201sim.vs') || 'off'; } catch { settings.vs = 'off'; }
+try { settings.aiLevel = localStorage.getItem('201sim.aiLevel') || 'District'; } catch { settings.aiLevel = 'District'; }
 
 async function init() {
   await RAPIER.init();
@@ -150,6 +154,18 @@ async function init() {
   const game = new Game(scene, robot, fuel, player);
   const match = new Match();
   game.match = match;
+  const ai = new AIPlayers(scene, RAPIER, world, fuel);
+  game.onScored = (b, al, counted) => {
+    if (counted && !b.bot && al === settings.alliance) game.myScored = (game.myScored || 0) + 1;
+    ai.credit(b, counted);
+  };
+  // set up the AI robots for a new match (the field map is built the first time)
+  const setupAi = () => {
+    if (settings.vs === 'off') { ai.clear(); return; }
+    if (!ai.nav) ai.buildNav(robot.body);
+    const [mine, theirs] = settings.vs.split('v').map(Number);
+    ai.setup({ alliance: settings.alliance, station: settings.station, mine, theirs, level: settings.aiLevel });
+  };
   const input = new Input();
 
   // ------------------------------------------------------------ menu
@@ -174,9 +190,11 @@ async function init() {
     robot.fieldForward = settings.alliance === BLUE ? 0 : Math.PI;
     robot.bumperMat.color.set(settings.alliance === BLUE ? 0x1f6fff : 0xe8322f);
     game.preloadOn = settings.preload;
+    game.myScored = 0;
     humans?.setAlliance(settings.alliance);
     game.reset();
     match.reset(settings.mode === 'match');
+    ai?.reset();
     ui.results.hidden = true;
     ui.scorebar?.classList.remove('final');
     ui.hud?.classList.remove('final');
@@ -199,6 +217,22 @@ async function init() {
     settings.spawn = b.dataset.spawn;
     try { localStorage.setItem('201sim.spawn', settings.spawn); } catch { /* not saved */ }
     refreshMenu(); restart();
+  }));
+  const vsBtns = document.querySelectorAll('[data-vs]');
+  vsBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.vs = b.dataset.vs;
+    try { localStorage.setItem('201sim.vs', settings.vs); } catch { /* not saved */ }
+    refreshMenu();
+  }));
+  document.getElementById('ai-forget').addEventListener('click', (e) => {
+    resetAiMemory(); ai.forget();
+    e.currentTarget.textContent = 'Forgotten';
+  });
+  const aiLvBtns = document.querySelectorAll('[data-ailevel]');
+  aiLvBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.aiLevel = b.dataset.ailevel;
+    try { localStorage.setItem('201sim.aiLevel', settings.aiLevel); } catch { /* not saved */ }
+    refreshMenu();
   }));
   const preloadBtns = document.querySelectorAll('[data-preload]');
   preloadBtns.forEach((b) => b.addEventListener('click', () => {
@@ -230,6 +264,9 @@ async function init() {
     camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
     preloadBtns.forEach((b) => b.classList.toggle('on', (b.dataset.preload === 'on') === settings.preload));
     spawnBtns.forEach((b) => b.classList.toggle('on', b.dataset.spawn === settings.spawn));
+    document.querySelectorAll('[data-vs]').forEach((b) => b.classList.toggle('on', b.dataset.vs === settings.vs));
+    document.querySelectorAll('[data-ailevel]').forEach((b) => b.classList.toggle('on', b.dataset.ailevel === settings.aiLevel));
+    document.getElementById('ai-level-opt').hidden = settings.vs === 'off';
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));
@@ -254,6 +291,7 @@ async function init() {
   }
   const camName = () => CAMERAS[camIndex];
   const start = () => {
+    setupAi();
     restart();
     setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.camDs ?? settings.station);
     snapCam = true;
@@ -391,14 +429,16 @@ async function init() {
         const ex = robot.feel?.expo ?? 1;
         const soft = (v) => Math.sign(v) * Math.abs(v) ** ex;
         robot.drive(soft(inp.forward) * slow, soft(inp.strafe) * slow, aimTurn ?? soft(inp.turn), STEP);
+        ai.step(STEP, robot, game, match);
         world.step();
         robot.snapshot();
+        ai.snapshot();
         fuel.snapshot();
         acc -= STEP;
       }
       physMs += performance.now() - p0;
       const wasDisabled = match.disabled;
-      if (match.update(dt)) showResults();
+      if (match.update(dt)) { ai.matchOver(game); showResults(); }
       // match sounds on each change of period
       if (match.on) {
         const ph = match.over ? 'MATCH OVER' : match.phase().name;
@@ -430,6 +470,7 @@ async function init() {
     navPrev = pad ? pad.buttons.map((b) => b.value) : [];
     const alpha = state === 'play' ? acc / STEP : 1;
     robot.sync(dt, alpha);
+    ai.sync(alpha);
     humans.update(dt);
     fuel.sync(alpha);
     game.drawAim();
@@ -490,9 +531,12 @@ async function init() {
     setText(ui.scoreBlue, String(game.score[BLUE]));
     setText(ui.scoreRed, String(game.score[RED]));
     for (const a of [BLUE, RED]) {
-      const slot = document.querySelector(`#sb-teams-${a} span`);
-      setClass(slot, settings.alliance === a ? 'us' : '');
-      setText(slot.querySelector('b'), settings.alliance === a ? '201' : '----');
+      const nums = (settings.alliance === a ? ['201'] : []).concat(ai.teams[a].map(String));
+      document.querySelectorAll(`#sb-teams-${a} span`).forEach((slot, i) => {
+        if (!slot.id) slot.id = `sb-${a}-${i}`;
+        setClass(slot, settings.alliance === a && i === 0 ? 'us' : nums[i] ? 'ai' : '');
+        setText(slot.querySelector('b'), nums[i] ?? '----');
+      });
       const live = match.on && !match.over;
       const on = match.isActive(a);
       const el = document.getElementById(`sb-hub-${a}`);
@@ -560,14 +604,15 @@ async function init() {
       return ['fuel', 'super', 'tower', 'win', 'win', 'win'].map((k, i) => `<span class="${got[i] ? 'got' : ''}">${RP_ICONS[k]}</span>`).join('');
     };
     const teams = (al) => {
-      const nums = al === mine ? ['201', '', ''] : ['', '', ''];
+      const bots = ai.teams[al].map(String);
+      const nums = (al === mine ? ['201', ...bots] : bots).concat(['', '', '']).slice(0, 3);
       const rpTotal = rp(al).filter(Boolean).length;
       return nums.map((n) => `<div class="fr-team ${n ? '' : 'empty'}"><span>${n || '----'}</span><b>${n ? rpTotal : ''}</b></div>`).join('');
     };
     const winner = (al) => won === al ? '<div class="fr-winner">' + RP_ICONS.win + 'WINNER</div>'
       : won === null ? '<div class="fr-winner tie">TIE</div>' : '<div class="fr-winner none"></div>';
     const row = (label, k, cls = '') => `<div class="fr-row ${cls}"><b>${S[BLUE][k]}</b><span>${label}</span><b>${S[RED][k]}</b></div>`;
-    const pts = match.points[mine] - (mine === opp ? fouls : 0);
+    const pts = game.myScored || 0;
     const acc = game.shots ? Math.round(((pts + game.missedInactive) / game.shots) * 100) : 0;
     ui.resultsBody.innerHTML = `
       <div class="fr-col blue">${winner(BLUE)}<div class="fr-teams">${teams(BLUE)}</div>
@@ -656,7 +701,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match, ai }; // handy for debugging in the console
 }
 
 /**

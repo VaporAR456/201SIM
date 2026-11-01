@@ -584,9 +584,12 @@ export class Game {
             this.foul('MAJOR', 'G407', 'scored from outside your ALLIANCE ZONE');
           }
           b.shot = null;
-          if (this.match ? this.match.scored(al) : true) this.score[al]++;
-          else this.missedInactive = (this.missedInactive || 0) + 1;
+          const counted = this.match ? this.match.scored(al) : true;
+          if (counted) this.score[al]++;
+          else if (!b.bot) this.missedInactive = (this.missedInactive || 0) + 1;
+          this.onScored?.(b, al, counted);
           this.fuel.disable(b);
+          b.queued = true;
           this.exitQueue.push({ b, al, t: 0.6 });
         }
       }

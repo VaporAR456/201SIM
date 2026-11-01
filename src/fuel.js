@@ -84,6 +84,7 @@ export class Fuel {
     // a ball reused from a reset can still be marked as in the robot; clear it so the hopper
     // check sees it arrive and makes it held FUEL (the TRENCH arm skips held FUEL)
     b.inRobot = false;
+    b.queued = false;
     b.active = true;
     b.body.setEnabled(true);
     b.body.setTranslation({ x, y, z }, true);
@@ -123,7 +124,8 @@ export class Fuel {
 
   /** A switched-off ball to launch or drop, or null if every ball is in play. */
   takeSpare() {
-    return this.balls.find((b) => !b.active) || null;
+    // not one that's on its way back out of a HUB
+    return this.balls.find((b) => !b.active && !b.queued) || null;
   }
 
   /** Remember where every ball is after a physics step. Sleeping balls haven't moved. */
