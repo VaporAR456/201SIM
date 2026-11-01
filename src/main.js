@@ -362,7 +362,7 @@ async function init() {
       const p0 = performance.now();
       while (acc >= STEP) {
         // in third person, "forward" on the stick is the way the camera looks
-        robot.driveRef = camIndex === THIRD ? camYaw + (camFlip ? Math.PI : 0) : null;
+        robot.driveRef = camIndex === THIRD ? camYaw : null; // stick forward = away from the camera
         // the pause between AUTO and TELEOP (and after the buzzer): robot disabled
         const inp = match.disabled ? IDLE : input;
         const aimTurn = game.update(inp, STEP, settings.alliance);
@@ -529,13 +529,14 @@ async function init() {
   const hubs = [hubCenter(BLUE), hubCenter(RED)];
   // the HUB itself plus the net that leans out over its NEUTRAL ZONE side (up to ~1 m out, 3 m up)
   // inside the field only: never out behind a driver station or past a guardrail
-  const camBlocked = (x, z) => Math.abs(x) > HALF_L - 0.35 || Math.abs(z) > HALF_W - 0.25 || hubs.some((h) => {
+  // (the camera rides high enough to look over the alliance wall from just behind it)
+  const camBlocked = (x, z) => Math.abs(x) > HALF_L + 1.0 || hubs.some((h) => {
     const dz = Math.abs(z - h.z);
     if (dz > 0.85) return false;
     const out = (x - h.x) * -Math.sign(h.x); // toward the field center
     return out > -0.75 && out < 1.05;
   });
-  let camFlip = false; // false: third-person camera behind the robot (shooter side), true: intake side
+  let camFlip = false; // false: third-person camera at your alliance's end, true: the far end
   function updateCamera(dt) {
     if (camera.userData.freeze) return; // debugging: hold a hand-placed camera
     const p = tmp.copy(robot.root.position); // the drawn (blended) pose, so the camera never jitters against the model
@@ -555,21 +556,17 @@ async function init() {
       camLook.set(p.x, 0.3, p.z);
       camLook.lerp(tmp2.set(0, 0, ds.z * 0.5), 0.35);
     } else if (mode === 1) {
-      // third person (the original follow camera): behind the robot, swinging round smoothly
-      // as it turns. Flip (T / D-pad right) moves it to the other side of the robot.
-      let d = robot.yaw() - camYaw;
-      while (d > Math.PI) d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      // swings round faster while auto-aim is turning the robot to shoot
-      camYaw += d * (1 - Math.exp(-dt * (game.aim ? 10 : 5)));
-      const dir = camFlip ? 1 : -1; // -1: behind the robot's back
-      const cx = Math.cos(camYaw) * dir, cz = -Math.sin(camYaw) * dir;
+      // third person, MoSim style: up high behind the robot, always looking down the field from
+      // your alliance's end. It follows where the robot goes but not how it turns, so spinning
+      // never swings the view. Flip (T / D-pad right) watches from the other end instead.
+      camYaw = robot.fieldForward + (camFlip ? Math.PI : 0);
+      const cx = -Math.cos(camYaw), cz = Math.sin(camYaw); // from the robot back toward the camera
       // never sit inside a HUB or its net: slide in closer until the spot is clear, smoothly
-      let want = 3.4;
-      while (want > 0.6 && camBlocked(p.x + cx * want, p.z + cz * want)) want -= 0.05;
+      let want = 3.0;
+      while (want > 0.8 && camBlocked(p.x + cx * want, p.z + cz * want)) want -= 0.05;
       camDist += (want - camDist) * (1 - Math.exp(-dt * (want < camDist ? 10 : 3)));
-      camPos.set(p.x + cx * camDist, 2.0, p.z + cz * camDist);
-      camLook.set(p.x - cx * 2.0, 0.4, p.z - cz * 2.0);
+      camPos.set(p.x + cx * camDist, 2.6, p.z + cz * camDist);
+      camLook.set(p.x - cx * 1.2, 0.3, p.z - cz * 1.2);
     } else {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
@@ -581,8 +578,8 @@ async function init() {
     camera.position.lerp(camPos, k);
     // the follow camera never pokes through the guardrails or the alliance walls, even mid-swing
     if (mode === 1) {
-      camera.position.x = Math.max(-HALF_L + 0.3, Math.min(HALF_L - 0.3, camera.position.x));
-      camera.position.z = Math.max(-HALF_W + 0.2, Math.min(HALF_W - 0.2, camera.position.z));
+      camera.position.x = Math.max(-HALF_L - 1.0, Math.min(HALF_L + 1.0, camera.position.x));
+      camera.position.z = Math.max(-HALF_W - 0.5, Math.min(HALF_W + 0.5, camera.position.z));
     }
     if (!camera.userData.look) camera.userData.look = camLook.clone();
     camera.userData.look.lerp(camLook, k);
