@@ -183,11 +183,15 @@ export function buildField(scene, RAPIER, world) {
 
     // TOWER against the alliance wall
     {
-      const p = at(TOWER.depth / 2, TOWER.fy);
-      box(TOWER.baseDepth, 0.0064, TOWER.baseWidth, p.x, 0.0032, p.z, mat.steel, { solid: false });
+      // sizes and places from the official field CAD: the uprights stand 1.07 m out from the
+      // alliance wall, 0.86 m apart, on a 2.4in base plate that reaches 1.14 m out
+      const UP_X = 1.066, UP_GAP = 0.858;
+      const p = at(UP_X, TOWER.fy);
+      const base = at(1.14 / 2, TOWER.fy);
+      box(1.14, 0.06, 0.99, base.x, 0.03, base.z, mat.steel);
       for (const s of [-1, 1]) {
-        const up = at(TOWER.depth / 2, TOWER.fy + s * TOWER.uprightGap / 2);
-        box(3.5 * IN, TOWER.uprightHeight, 1.5 * IN, up.x, TOWER.uprightHeight / 2, up.z, mat.steel);
+        const up = at(UP_X, TOWER.fy + s * UP_GAP / 2);
+        box(0.09, 1.83, 0.033, up.x, 1.83 / 2, up.z, mat.steel);
       }
       // rungs (visual only for now; climbing comes later)
       for (const h of [27, 45, 63]) {
