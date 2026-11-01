@@ -6,6 +6,8 @@ import { FUEL_RADIUS, hubCenter } from './fuel.js';
 
 const G = 9.81;
 const deg = Math.PI / 180;
+// roughly normal noise (sum of uniforms), standard deviation ~1
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
 
 function wrap(a) {
   while (a > Math.PI) a -= 2 * Math.PI;
@@ -130,7 +132,9 @@ export class Game {
     const needLen = this.held ? Math.ceil(this.held / 11) * 0.165 + 0.01 : 0;
     const minFront = Math.max(hb.rearX + needLen, frontBall + FUEL_RADIUS + 0.01);
     const minPos = hop.outIn + (minFront + 0.1 - this.robot.halfL) / 0.0254;
-    target = Math.max(target, Math.min(hop.outIn, minPos));
+    // (except while shooting: then the agitator really does drive in and shove the pile at the
+    // spindexer, which is the whole point of it)
+    if (!(this.agitateT > 0)) target = Math.max(target, Math.min(hop.outIn, minPos));
     const step = hop.maxSpeedInPerS * dt;
     this.hopperPos += Math.max(-step, Math.min(step, target - this.hopperPos));
     this.robot.setHopper(this.hopperPos, hop.outIn);
@@ -170,7 +174,10 @@ export class Game {
 
     if (this.aim && this.aim.yaw !== undefined) {
       const err = wrap(this.aim.yaw - this.robot.yaw());
-      const omega = Math.max(-cfg.maxOmega, Math.min(cfg.maxOmega, 7 * err));
+      // a calm heading controller: no faster than ~60% of top turn rate, so it settles instead of
+      // whipping round while the robot moves
+      const lim = cfg.maxOmega * 0.6;
+      const omega = Math.max(-lim, Math.min(lim, 4.5 * err));
       turn = -omega / (cfg.maxOmega * this.robot.speedScale);
       turn = Math.max(-1, Math.min(1, turn));
       this.aim.ready = Math.abs(err) < 4 * deg;
@@ -279,7 +286,7 @@ export class Game {
   /** Let a ball the intake is feeding pass through the hopper's front door (or not). */
   setFeeding(b, on) {
     b.feeding = on;
-    b.body.collider(0).setCollisionGroups(groups(GROUP.FUEL, on ? 0xffff & ~GROUP.GATE : 0xffff));
+    this.fuel.updateGroups(b);
   }
 
   /** Find the FUEL sitting in the hopper (by position, in the robot's frame). */
@@ -302,7 +309,7 @@ export class Game {
       const t = b.body.translation();
       const dx = t.x - p.x, dz = t.z - p.z;
       if (dx * dx + dz * dz > 1.0) {
-        if (b.inRobot) { b.inRobot = false; b.body.enableCcd(false); this.fuel.setHeld(b, false); }
+        if (b.inRobot) { b.inRobot = false; this.fuel.setHeld(b, false); }
         if (b.feeding) this.setFeeding(b, false);
         continue;
       }
@@ -330,7 +337,7 @@ export class Game {
         }
       }
       const inside = v.x > hb.rearX - 0.08 && v.x < front + 0.02 && Math.abs(v.z) < hb.halfW + 0.03 && v.y > hb.floorY - 0.02 && v.y < hb.netY + 0.15;
-      if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(inside); this.fuel.setHeld(b, inside); }
+      if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(false); this.fuel.setHeld(b, inside); }
       // a fed ball that is well inside (or that missed) shuts the one-way door behind it
       if (b.feeding && (v.x < front - 0.01 || v.x > front + 0.5 || v.y > hb.netY + 0.2)) this.setFeeding(b, false);
       if (inside) { this.inside.push(b); this.insideLocal.push([v.x, v.y, v.z]); }
@@ -407,9 +414,13 @@ export class Game {
       spd = Math.min(spd * scale, maxSpeed);
       const tof = d / (spd * Math.cos(th));
       sol = { d, th, spd, want, ux: dx / d, uz: dz / d, tof };
-      // lead the target by where the robot's own motion will carry the ball
-      ax = tx - v.x * tof;
-      az = tz - v.z * tof;
+      // lead the target by where the robot's own motion will carry the ball (the aim does this
+      // well but not perfectly, and never by more than a meter)
+      let lx = v.x * tof * 0.85, lz = v.z * tof * 0.85;
+      const ll = Math.hypot(lx, lz);
+      if (ll > 1) { lx /= ll; lz /= ll; }
+      ax = tx - lx;
+      az = tz - lz;
     }
     const f = sh.facing;
     sol.yaw = Math.atan2(-f * sol.uz, f * sol.ux);
@@ -456,10 +467,15 @@ export class Game {
 
   /** The spindexer feeds whichever ball in the hopper is nearest the shooter tower. */
   feedBall() {
+    // only a ball down at the spindexer (low, against the shooter tower) gets picked up;
+    // the agitator pushes the rest of the pile back to it
+    const hb = this.cfg.hopper.box;
     let best = null, bx = Infinity;
-    this.inside.forEach((b, i) => { const x = this.insideLocal[i][0]; if (x < bx) { bx = x; best = b; } });
-    // nothing close enough to the spindexer yet: wait for the agitator to move the pile
-    return bx < this.cfg.hopper.box.rearX + 0.3 ? best : null;
+    this.inside.forEach((b, i) => {
+      const [x, y] = this.insideLocal[i];
+      if (x < hb.rearX + 0.2 && y < hb.floorY + 0.2 && x < bx) { bx = x; best = b; }
+    });
+    return best;
   }
 
   launch(aim) {
@@ -470,9 +486,13 @@ export class Game {
     const e = this.exitPoint();
     const v = this.robot.body.linvel();
     // a little spread so not every shot is perfect
-    const yawN = (Math.random() - 0.5) * 2 * sh.spreadDeg * deg;
-    const thN = aim.th + (Math.random() - 0.5) * 2 * sh.spreadDeg * deg;
-    const spd = aim.spd * (1 + (Math.random() - 0.5) * 2 * sh.speedNoise);
+    // Auto aim points the shooter at the HUB; it doesn't make every ball go in. Real shots
+    // scatter, and more so on the move.
+    const moving = Math.hypot(v.x, v.z);
+    const spread = (sh.spreadDeg + moving * 1.5) * deg;
+    const yawN = gauss() * spread;
+    const thN = aim.th + gauss() * spread * 0.8;
+    const spd = aim.spd * (1 + gauss() * (sh.speedNoise + moving * 0.01));
     const cy = Math.cos(yawN), sy = Math.sin(yawN);
     const ux = aim.ux * cy - aim.uz * sy;
     const uz = aim.ux * sy + aim.uz * cy;

@@ -144,7 +144,7 @@ for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
 }
 // simplify with an absolute error in meters: a relative error collapses thin parts on long meshes
 // (the TRENCH arms vanished that way)
-const ERR = Number(process.env.ERR || 0.004);
+const ERR = Number(process.env.ERR || 0.0012); // thinner than the field's sheet metal, or panels and tubes collapse flat
 for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
   const idx = p.getIndices(); if (!idx || p.getMaterial() === carpetMat) continue; // the 5mm carpet would collapse below the floor
   const pos = p.getAttribute('POSITION');

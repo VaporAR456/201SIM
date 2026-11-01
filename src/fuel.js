@@ -80,6 +80,7 @@ export class Fuel {
   }
 
   enable(b, x, y, z, vx, vy, vz) {
+    if (b.held) this.setHeld(b, false);
     b.active = true;
     b.body.setEnabled(true);
     b.body.setTranslation({ x, y, z }, true);
@@ -100,6 +101,15 @@ export class Fuel {
     const c = b.body.collider(0);
     if (b.baseDensity === undefined) b.baseDensity = c.density();
     c.setDensity(held ? b.baseDensity * 0.03 : b.baseDensity);
+    b.held = held;
+    this.updateGroups(b);
+  }
+
+  /** Collision groups from the ball's state: held FUEL is its own group (the TRENCH arm skips it),
+   *  and a ball being fed by the intake passes through the hopper's one-way gate. */
+  updateGroups(b) {
+    const member = b.held ? GROUP.HELD : GROUP.FUEL;
+    b.body.collider(0).setCollisionGroups(groups(member, b.feeding ? 0xffff & ~GROUP.GATE : 0xffff));
   }
 
   disable(b) {

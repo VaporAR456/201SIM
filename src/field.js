@@ -48,7 +48,7 @@ export function buildField(scene, RAPIER, world) {
   const collider = (desc, x, y, z, rotY = 0) => {
     desc.setTranslation(x, y, z).setFriction(0.8);
     if (rotY) desc.setRotation(quatY(rotY));
-    world.createCollider(desc, fixed);
+    return world.createCollider(desc, fixed);
   };
 
   // A box: visual + collider. Position is the box center.
@@ -58,7 +58,7 @@ export function buildField(scene, RAPIER, world) {
     m.castShadow = shadow;
     m.receiveShadow = true;
     group.add(m);
-    if (solid) collider(RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2), x, y, z);
+    if (solid) m.userData.collider = collider(RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2), x, y, z);
     return m;
   };
 
@@ -174,7 +174,9 @@ export function buildField(scene, RAPIER, world) {
       box(TRENCH.depth, TRENCH.skirtHeight, skirtW, skirtMid.x, TRENCH.skirtHeight / 2, skirtMid.z, mat.dark);
       // arm across the opening; robots taller than 22.25in hit it
       const armH = TRENCH.armTop - TRENCH.clearHeight;
-      box(6 * IN, armH, TRENCH.clearWidth, openMid.x, TRENCH.clearHeight + armH / 2, openMid.z, mat[a]);
+      const arm = box(6 * IN, armH, TRENCH.clearWidth, openMid.x, TRENCH.clearHeight + armH / 2, openMid.z, mat[a]);
+      // FUEL piled in a robot's hopper (under 22.25in, like the robot) doesn't snag on the arm
+      arm.userData.collider.setCollisionGroups(groups(GROUP.FIELD, 0xffff & ~GROUP.HELD));
       // posts holding the AprilTag mount
       box(6 * IN, TRENCH.tagTop - TRENCH.armTop, 11.5 * IN, openMid.x, TRENCH.armTop + (TRENCH.tagTop - TRENCH.armTop) / 2, openMid.z, mat.steel);
     }

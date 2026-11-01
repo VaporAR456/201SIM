@@ -57,8 +57,8 @@ export const ROBOT_201 = {
     manualDist: 3.0, // m, manual shoot is a fixed shot tuned for this distance
     passAngle: 45,
     passLandFx: 2.4, // m from your alliance wall where passes aim to land
-    spreadDeg: 1.0,
-    speedNoise: 0.02,
+    spreadDeg: 1.6, // standard deviation of a stationary shot
+    speedNoise: 0.03,
   },
 
   // Where held FUEL sits (robot frame, meters), and the net stretched over the top of it

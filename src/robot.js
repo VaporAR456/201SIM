@@ -19,7 +19,7 @@ export class Robot {
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setCanSleep(false)
-        .setCcdEnabled(true)
+        .setCcdEnabled(false) // CCD against the FUEL riding inside it made turning stutter
         .setLinearDamping(0)
         .setAngularDamping(0),
     );
@@ -64,11 +64,11 @@ export class Robot {
     const sH = (solidTop - hb.floorY) / 2, uH = (hb.netY + 0.04 - solidTop) / 2;
     for (const sz of [-1, 1]) {
       solid(RAPIER.ColliderDesc.cuboid(sideLen, sH, 0.03), sideBack + sideLen, hb.floorY + sH, sz * (hb.halfW + 0.03), 0.2);
-      world.createCollider(RAPIER.ColliderDesc.cuboid(sideLen, uH, 0.03).setCollisionGroups(groups(GROUP.INTAKE, GROUP.FUEL))
+      world.createCollider(RAPIER.ColliderDesc.cuboid(sideLen, uH, 0.03).setCollisionGroups(groups(GROUP.INTAKE, GROUP.FUEL | GROUP.HELD))
         .setTranslation(sideBack + sideLen, solidTop + uH, sz * (hb.halfW + 0.03)).setFriction(0.3).setDensity(0), body);
     }
     // the net over the fixed part of the hopper (only stops FUEL)
-    const fuelOnly = groups(GROUP.INTAKE, GROUP.FUEL);
+    const fuelOnly = groups(GROUP.INTAKE, GROUP.FUEL | GROUP.HELD);
     this.netColliders = [world.createCollider(
       RAPIER.ColliderDesc.cuboid((L - hb.rearX) / 2, 0.02, hb.halfW + 0.05).setCollisionGroups(fuelOnly)
         .setTranslation((L + hb.rearX) / 2, hb.netY + 0.02, 0).setDensity(0).setFriction(0.2), body)];
@@ -91,7 +91,7 @@ export class Robot {
     this.netColliders.push(this.slide[3].c);
     // above the lip, the intake opening: a one-way door. FUEL the rollers are feeding passes
     // through it (see Game.collect); FUEL already inside can't fall back out the front.
-    this.gate = { c: world.createCollider(RAPIER.ColliderDesc.cuboid(0.02, (hb.netY - hb.frontTop) / 2, hb.halfW + 0.05).setCollisionGroups(groups(GROUP.GATE, GROUP.FUEL)).setDensity(0).setFriction(0.3), body),
+    this.gate = { c: world.createCollider(RAPIER.ColliderDesc.cuboid(0.02, (hb.netY - hb.frontTop) / 2, hb.halfW + 0.05).setCollisionGroups(groups(GROUP.GATE, GROUP.FUEL | GROUP.HELD)).setDensity(0).setFriction(0.3), body),
       dx: 0.02, y: (hb.netY + hb.frontTop) / 2, z: 0 };
     this.slide.push(this.gate);
     // Skids under the frame, so the body rests on the carpet at bumper height
@@ -110,7 +110,7 @@ export class Robot {
       this.intakeCollider = world.createCollider(
         RAPIER.ColliderDesc.cuboid(cfg.intakeReach / 2, ih, cfg.intakeWidth / 2)
           // the intake doesn't catch on BUMPS, and lets FUEL through to be collected
-          .setCollisionGroups(groups(GROUP.INTAKE, 0xffff & ~GROUP.TERRAIN & ~GROUP.FUEL))
+          .setCollisionGroups(groups(GROUP.INTAKE, 0xffff & ~GROUP.TERRAIN & ~GROUP.FUEL & ~GROUP.HELD))
           .setTranslation(L + cfg.intakeReach / 2, cfg.bumperBottom + ih, 0)
           .setFriction(0)
           .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
@@ -126,6 +126,15 @@ export class Robot {
     }
     this.body = body;
     this.modulePos = cfg.modules;
+    // is it off the ground? (a ray down from the middle of the belly to the carpet or a BUMP)
+    const ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
+    const groundGroups = groups(0xffff, GROUP.FIELD | GROUP.TERRAIN);
+    this.airborne = () => {
+      const p = body.translation();
+      ray.origin = { x: p.x, y: p.y + 0.3, z: p.z };
+      const hit = world.castRay(ray, 0.5, true, undefined, groundGroups, undefined, body);
+      return !hit || hit.toi > 0.3 + 0.09;
+    };
 
     // ---------------------------------------------------------- visuals
     this.root = new THREE.Group();
@@ -384,12 +393,13 @@ export class Robot {
       this.cmd = { vx: 0, vz: 0, omega: 0 };
       return;
     }
-    // wheels lose grip as it tips: no driving while it's up on two wheels
-    const grip = Math.max(0, Math.min(1, (uy - 0.8) / 0.15));
+    // wheels lose grip as it tips up on two wheels, and have none in the air
+    let grip = Math.max(0, Math.min(1, (uy - 0.6) / 0.2));
+    if (this.airborne?.()) grip = 0;
     vx = lv.x + (vx - lv.x) * grip;
     vz = lv.z + (vz - lv.z) * grip;
     let ax = av.x * 0.97, az = av.z * 0.97;
-    const over = tilt - 0.3; // ~17 degrees of free tilt for the BUMPS
+    const over = tilt - 0.5; // ~29 degrees of free tilt: the BUMP ramps are ~22
     if (over > 0) {
       // turn about (up x Y) to bring up back to vertical
       const n = Math.hypot(uz, ux) || 1;
@@ -400,7 +410,8 @@ export class Robot {
       const away = -(ax * -uz + az * ux) / n;
       if (away > 0) { ax += (-uz / n) * away; az += (ux / n) * away; }
     }
-    this.body.setLinvel({ x: vx, y: lv.y, z: vz }, true);
+    // a 138 lb robot cresting a BUMP hops, it doesn't launch: cap how fast it can rise
+    this.body.setLinvel({ x: vx, y: Math.min(lv.y, 0.7), z: vz }, true);
     // keep whatever pitch/roll the BUMPS give it, with a little damping so it settles
     this.body.setAngvel({ x: ax, y: omega, z: az }, true);
     this.cmd = { vx, vz, omega };

@@ -38,7 +38,8 @@ export function buildAprilTags(scene) {
     for (let k = 0; k < uv.count; k++) uv.setX(k, (i + uv.getX(k)) / TAGS.length);
     // the plane faces +Z; turn it to face along the tag's normal, upright
     g.rotateY(Math.atan2(t.n[0], t.n[2]));
-    g.translate(t.p[0] + t.n[0] * 0.004, t.p[1], t.p[2] + t.n[2] * 0.004);
+    // out past the clear cover that sits in front of some of the vinyl tags
+    g.translate(t.p[0] + t.n[0] * 0.011, t.p[1], t.p[2] + t.n[2] * 0.011);
     return g;
   });
   const mesh = new THREE.Mesh(mergeGeometries(geos), new THREE.MeshLambertMaterial({ map: tex }));

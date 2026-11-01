@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildAprilTags } from './apriltags.js';
-import { HALF_L, HALF_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups } from './constants.js';
+import { HALF_L, HALF_W, FIELD_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, TRENCH, HUB } from './constants.js';
 import { buildField } from './field.js';
 import { buildArena } from './arena.js';
 import { Robot } from './robot.js';
@@ -53,6 +53,7 @@ const ui = {
 const settings = { alliance: BLUE, station: 1, mode: 'match', cam: 'ds' };
 try { settings.cam = localStorage.getItem('201sim.startCam') || 'ds'; } catch { /* default */ }
 try { settings.preload = localStorage.getItem('201sim.preload') !== 'off'; } catch { settings.preload = true; }
+try { settings.spawn = localStorage.getItem('201sim.spawn') || 'station'; } catch { settings.spawn = 'station'; }
 
 async function init() {
   await RAPIER.init();
@@ -151,6 +152,12 @@ async function init() {
   let state = 'menu';
   let camIndex = 0;
   const startPose = () => {
+    // under the left or right TRENCH (left/right as the drivers see it)
+    if (settings.spawn === 'trenchL' || settings.spawn === 'trenchR') {
+      const fy = settings.spawn === 'trenchL' ? FIELD_W - TRENCH.clearWidth / 2 : TRENCH.clearWidth / 2;
+      const p = fieldToWorld(HUB.fx, fy, settings.alliance);
+      return { ...p, yaw: settings.alliance === BLUE ? 0 : Math.PI };
+    }
     const st = STATIONS[settings.station];
     const fx = ALLIANCE_ZONE_DEPTH - robot.halfL - 0.15;
     const p = fieldToWorld(fx, st.fy, settings.alliance);
@@ -181,6 +188,12 @@ async function init() {
     refreshMenu();
   }));
   modeBtns.forEach((b) => b.addEventListener('click', () => { settings.mode = b.dataset.mode; refreshMenu(); }));
+  const spawnBtns = document.querySelectorAll('[data-spawn]');
+  spawnBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.spawn = b.dataset.spawn;
+    try { localStorage.setItem('201sim.spawn', settings.spawn); } catch { /* not saved */ }
+    refreshMenu(); restart();
+  }));
   const preloadBtns = document.querySelectorAll('[data-preload]');
   preloadBtns.forEach((b) => b.addEventListener('click', () => {
     settings.preload = b.dataset.preload === 'on';
@@ -208,6 +221,7 @@ async function init() {
     modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
     camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
     preloadBtns.forEach((b) => b.classList.toggle('on', (b.dataset.preload === 'on') === settings.preload));
+    spawnBtns.forEach((b) => b.classList.toggle('on', b.dataset.spawn === settings.spawn));
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));
@@ -338,7 +352,9 @@ async function init() {
         // the pause between AUTO and TELEOP (and after the buzzer): robot disabled
         const inp = match.disabled ? IDLE : input;
         const aimTurn = game.update(inp, STEP, settings.alliance);
-        robot.drive(inp.forward, inp.strafe, aimTurn ?? inp.turn, STEP);
+        // shooting on the move: the drive slows right down so the shots can land
+        const slow = game.aim && game.held > 0 ? 0.3 : 1;
+        robot.drive(inp.forward * slow, inp.strafe * slow, aimTurn ?? inp.turn, STEP);
         world.step();
         robot.snapshot();
         fuel.snapshot();
@@ -474,7 +490,8 @@ async function init() {
   let menuT = 0.6;
   const hubs = [hubCenter(BLUE), hubCenter(RED)];
   // the HUB itself plus the net that leans out over its NEUTRAL ZONE side (up to ~1 m out, 3 m up)
-  const camBlocked = (x, z) => hubs.some((h) => {
+  // inside the field only: never out behind a driver station or past a guardrail
+  const camBlocked = (x, z) => Math.abs(x) > HALF_L - 0.35 || Math.abs(z) > HALF_W - 0.25 || hubs.some((h) => {
     const dz = Math.abs(z - h.z);
     if (dz > 0.85) return false;
     const out = (x - h.x) * -Math.sign(h.x); // toward the field center
@@ -506,12 +523,12 @@ async function init() {
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
       // swings round faster while auto-aim is turning the robot to shoot
-      camYaw += d * (1 - Math.exp(-dt * (game.aim ? 9 : 2.5)));
+      camYaw += d * (1 - Math.exp(-dt * (game.aim ? 10 : 5)));
       const dir = camFlip ? 1 : -1; // -1: behind the robot's back
       const cx = Math.cos(camYaw) * dir, cz = -Math.sin(camYaw) * dir;
       // never sit inside a HUB or its net: slide in closer until the spot is clear, smoothly
       let want = 3.4;
-      while (want > 1.0 && camBlocked(p.x + cx * want, p.z + cz * want)) want -= 0.05;
+      while (want > 0.6 && camBlocked(p.x + cx * want, p.z + cz * want)) want -= 0.05;
       camDist += (want - camDist) * (1 - Math.exp(-dt * (want < camDist ? 10 : 3)));
       camPos.set(p.x + cx * camDist, 2.0, p.z + cz * camDist);
       camLook.set(p.x - cx * 2.0, 0.4, p.z - cz * 2.0);
