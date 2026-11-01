@@ -192,6 +192,12 @@ export class Game {
       this.aim.err = err;
     }
 
+    // deload: roll FUEL back out over the intake, e.g. to hand it to the human player
+    this.deloadT = (this.deloadT || 0) - dt;
+    if (input.held('deload') && !shooting && this.held > 0 && this.deloadT <= 0 && !(this.match?.countdown > 0)) {
+      this.deloadT = 1 / 8;
+      this.deload();
+    }
     this.fireT -= dt;
     this.robot.spinIndexer(shooting && this.held > 0 ? dt : 0);
     if (this.aim && this.aim.ready && this.held > 0 && this.fireT <= 0 && !(this.match?.countdown > 0)) {
@@ -498,6 +504,26 @@ export class Game {
     return best;
   }
 
+  /** Push one FUEL out the front of the robot, low and slow. */
+  deload() {
+    // the ball nearest the intake goes first
+    let best = -1, bx = -Infinity;
+    this.insideLocal.forEach((l, i) => { if (l[0] > bx) { bx = l[0]; best = i; } });
+    if (best < 0) return;
+    const b = this.inside[best];
+    const r = this.robot;
+    const yaw = r.yaw(), c = Math.cos(yaw), s = Math.sin(yaw);
+    const p = r.body.translation();
+    const v = r.body.linvel();
+    const out = r.halfL + (this.cfg.intakeReach ?? 0.2) + 0.12;
+    const side = (Math.random() - 0.5) * 0.3;
+    b.inRobot = false;
+    this.fuel.enable(b, p.x + c * out + s * side, 0.25, p.z - s * out + c * side, v.x + c * 2.2, 0.6, v.z - s * 2.2);
+    b.shot = null;
+    this.held--;
+    this.inside.splice(best, 1); this.insideLocal.splice(best, 1);
+  }
+
   launch(aim) {
     const b = this.feedBall();
     if (!b) return;
@@ -553,8 +579,8 @@ export class Game {
     if (this.match?.over) return;
     this.score[opp] += pts;
     if (this.match) this.match.points[opp] += pts;
-    (this.aiFouls ||= []).push({ al, team, kind, rule, pts });
-    this.onFoul?.(`${kind} FOUL ${rule} on ${team}: ${why} (+${pts} ${opp.toUpperCase()})`);
+    (this.aiFouls ||= []).push({ al, team, kind, rule, pts, why });
+    this.onFoul?.(`${kind} FOUL${rule ? ` ${rule}` : ''} on ${team}: ${why} (+${pts} ${opp.toUpperCase()})`);
   }
 
   /** TOWER points for an alliance (AI robots that climb). */

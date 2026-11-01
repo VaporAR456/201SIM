@@ -10,6 +10,7 @@ import { buildArena } from './arena.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
 import { Humans } from './humans.js';
+import { HubLights } from './hublights.js';
 import { AIPlayers, resetAiMemory } from './ai.js';
 import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
@@ -166,7 +167,10 @@ async function init() {
     if (!ai.nav) ai.buildNav(robot.body);
     const [mine, theirs] = settings.vs.split('v').map(Number);
     ai.setup({ alliance: settings.alliance, station: settings.station, mine, theirs, level: settings.aiLevel });
-    if (ai.event) setTimeout(() => toast(`Realistic: a ${ai.event.name} level match`, 'info', 4), 300);
+    const lineup = ai.bots.filter((b) => b.alliance !== settings.alliance).map((b) => `${b.team} ${b.name}`).join(', ');
+    if (ai.elites.length) setTimeout(() => toast(`Heads up: ${ai.elites.map((b) => `${b.team} ${b.name}`).join(' and ')} on the other alliance`, 'info', 5), 300);
+    else if (ai.event) setTimeout(() => toast(`Realistic: a ${ai.event.name} level match`, 'info', 4), 300);
+    else if (lineup) setTimeout(() => toast(`Opponents: ${lineup}`, 'info', 4), 300);
   };
   const input = new Input();
 
@@ -204,6 +208,7 @@ async function init() {
   };
   let clearToast = null;
   let humans = null;
+  let hubLights = null;
   restart();
 
   const modeBtns = document.querySelectorAll('[data-mode]');
@@ -332,6 +337,7 @@ async function init() {
   addEventListener('keydown', () => sound.unlock());
   game.onShot = () => sound.shot();
   humans = new Humans(scene);
+  hubLights = new HubLights(scene);
   humans.setAlliance(settings.alliance);
   game.onHumanThrow = (al) => humans.throwBall(al);
   let lastPhase = null;
@@ -474,6 +480,7 @@ async function init() {
     robot.sync(dt, alpha);
     ai.sync(alpha);
     humans.update(dt);
+    hubLights?.update(match, dt);
     fuel.sync(alpha);
     game.drawAim();
     game.drawHeld(now / 1000);
@@ -487,7 +494,7 @@ async function init() {
       setText(ui.speed, `${robot.speed().toFixed(1)} m/s`);
       setText(ui.cam, camName());
       const on = Object.entries(ACTIONS)
-        .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'climb', 'special1', 'special2', 'special3'].includes(k) && input.held(k))
+        .filter(([k]) => ['intake', 'autoShoot', 'autoPass', 'manualShoot', 'deload', 'special1', 'special2', 'special3'].includes(k) && input.held(k))
         .map(([, b]) => b.label);
       setText(ui.actions, on.join(' · '));
       setText(ui.held, `${game.held} / ${game.capacity}`);
@@ -608,7 +615,7 @@ async function init() {
     };
     const teams = (al) => {
       // each robot: team number and the points it scored itself
-      const rows = ai.bots.filter((b) => b.alliance === al).map((b) => ({ n: String(b.team), pts: b.scored + (b.towerPts || 0), note: b.typeName }));
+      const rows = ai.bots.filter((b) => b.alliance === al).map((b) => ({ n: String(b.team), pts: b.scored + (b.towerPts || 0), note: b.name || b.typeName }));
       if (al === mine) rows.unshift({ n: '201', pts: game.myScored || 0, note: 'you' });
       while (rows.length < 3) rows.push(null);
       const rpTotal = rp(al).filter(Boolean).length;
@@ -630,7 +637,7 @@ async function init() {
           <div class="fr-head">AUTO</div>${row('FUEL', 'auto')}<div class="fr-row"><b>0</b><span>TOWER</span><b>0</b></div>
           <div class="fr-head">TELEOP</div>${row('FUEL', 'tele', 'lite')}${row('TOWER', 'tower', 'lite')}${row('PENALTY', 'pen', 'lite')}
         </div>
-        <div class="fr-stats">201: <b>${game.shots}</b> FUEL shot · <b>${acc}%</b> went in · <b>${game.missedInactive}</b> in an inactive HUB · fouls: <b>${game.fouls.length ? game.fouls.map((f) => `${f.kind} ${f.rule}`).join(', ') : 'none'}</b></div>
+        <div class="fr-stats">201: <b>${game.shots}</b> FUEL shot · <b>${acc}%</b> went in · <b>${game.missedInactive}</b> in an inactive HUB · fouls: <b>${(() => { const l = [...game.fouls.map((f) => `${f.kind} ${f.rule}`), ...(game.aiFouls || []).filter((f) => f.team === 201).map((f) => `${f.kind} (${f.why})`)]; return l.length ? l.join(', ') : 'none'; })()}</b></div>
       </div>
       <div class="fr-col red">${winner(RED)}<div class="fr-teams">${teams(RED)}</div>
         <div class="fr-rp"><h3>RANKING POINTS</h3><div class="fr-icons">${icons(RED)}</div></div></div>`;
@@ -708,7 +715,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match, ai }; // handy for debugging in the console
+  window.__sim = { get hubLights() { return hubLights; }, robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE, match, ai }; // handy for debugging in the console
 }
 
 /**

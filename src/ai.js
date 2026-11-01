@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { HALF_L, HALF_W, BLUE, RED, HUB, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, fieldToWorld, OUTPOST, TOWER } from './constants.js';
 import { FUEL_RADIUS, hubCenter } from './fuel.js';
+import { MIDLAND, TROY, STATES, MILSTEIN, TOP, ELITE } from './teams.js';
 
 const G = 9.81;
 const deg = Math.PI / 180;
@@ -32,16 +33,55 @@ const LEVELS = [
   { name: 'Medium', react: 0.35, aim: 5.5, speed: 0.78, fire: 1.9, intake: 0.7, think: 0.3, mistakes: 0.15 },
   { name: 'Hard', react: 0.2, aim: 3.6, speed: 0.95, fire: 3.4, intake: 1.15, think: 0.2, mistakes: 0.07 },
   { name: 'Challenging', react: 0.1, aim: 2.2, speed: 1.1, fire: 6.5, intake: 2.0, think: 0.1, mistakes: 0.02 },
+  // the world's best (300+ EPA): only real teams this good get here
+  { name: 'Elite', react: 0.07, aim: 1.6, speed: 1.15, fire: 10, intake: 3.2, think: 0.08, mistakes: 0.01 },
 ];
-export const AI_LEVEL_NAMES = [...LEVELS.map((l) => l.name), 'Realistic', 'Adaptive'];
-/** A skill between the levels: t = 0 (Easy) .. 3 (Challenging). */
+export const AI_LEVEL_NAMES = [...LEVELS.slice(0, 4).map((l) => l.name), 'Realistic', 'Adaptive'];
+/** A skill between the levels: t = 0 (Easy) .. 3 (Challenging) .. 4 (Elite). Below 0 is weaker still. */
 function levelAt(t) {
-  t = clamp(t, 0, 3);
-  const i = Math.min(2, Math.floor(t)), f = t - i, A = LEVELS[i], B = LEVELS[i + 1];
+  const weak = Math.min(0, t);
+  t = clamp(t, 0, 4);
+  const i = Math.min(3, Math.floor(t)), f = t - i, A = LEVELS[i], B = LEVELS[i + 1];
   const out = { t };
   for (const k of ['react', 'aim', 'speed', 'fire', 'intake', 'think', 'mistakes']) out[k] = A[k] + (B[k] - A[k]) * f;
+  // the weakest real robots barely score: slower cycles, worse aim
+  if (weak < 0) { out.fire *= 1 + weak * 0.6; out.intake *= 1 + weak * 0.5; out.aim *= 1 - weak * 0.5; out.t = weak; }
   return out;
 }
+
+// A real robot's skill from its Statbotics EPA (points it adds to its alliance per match). The
+// points per level come from running AI-only matches at each level: ~30 / 77 / 110 / 175 / 330.
+const EPA_T = [[0, -0.7], [30, 0], [77, 1], [110, 2], [175, 3], [330, 4]];
+function epaToT(e) {
+  for (let i = 1; i < EPA_T.length; i++) {
+    const [a, ta] = EPA_T[i - 1], [b, tb] = EPA_T[i];
+    if (e <= b || i === EPA_T.length - 1) return ta + (tb - ta) * clamp((e - a) / (b - a), 0, 1.2);
+  }
+  return 0;
+}
+function tToEpa(t) {
+  for (let i = 1; i < EPA_T.length; i++) {
+    const [a, ta] = EPA_T[i - 1], [b, tb] = EPA_T[i];
+    if (t <= tb || i === EPA_T.length - 1) return a + (b - a) * clamp((t - ta) / (tb - ta), 0, 1);
+  }
+  return 0;
+}
+const entry = ([team, name, epa, tower, auto]) => ({ team, name, epa, tower, auto });
+const EVENT_ROSTERS = [MIDLAND, TROY, STATES, MILSTEIN]; // same order as REAL_EVENTS
+/** Every team once (its latest / best-known numbers), never 201. */
+function uniq(lists) {
+  const m = new Map();
+  for (const l of lists) for (const r of l) if (r[0] !== 201) m.set(r[0], entry(r));
+  return [...m.values()];
+}
+// who you can meet at each difficulty
+const POOLS = {
+  Easy: () => uniq([MIDLAND, TROY]).filter((e) => e.epa < 60),
+  Medium: () => uniq([MIDLAND, TROY, STATES, MILSTEIN]).filter((e) => e.epa >= 40 && e.epa <= 120),
+  Hard: () => uniq([STATES, MILSTEIN]).filter((e) => e.epa >= 90 && e.epa <= 200),
+  Challenging: () => uniq([MILSTEIN, TOP]).filter((e) => e.epa > 150 && !ELITE[e.team]),
+  all: () => uniq([MIDLAND, TROY, STATES, MILSTEIN, TOP]),
+};
 // Realistic: 201's 2026 season from FIRST's match results (alliance scores, quals). Each match
 // is set at one of these events' level, and the robots in it are spread around that level the
 // way real alliances mix strong and weak robots.
@@ -329,25 +369,42 @@ export class AIPlayers {
     let r = seed ? Number(seed) || [...String(seed)].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) : Math.floor(Math.random() * 1e9);
     this.seed = r;
     const rand = () => { r = (r * 1103515245 + 12345) % 2147483648; return r / 2147483648; };
-    // the skill every robot is built around, and how far each one strays from it
-    let base, spread = 0.25;
+    // which real teams can show up, and how far each one strays from its usual level this match
+    let pool, spread = 0.18;
     this.event = null;
+    this.elites = [];
     if (level === 'Realistic') {
-      this.event = REAL_EVENTS[Math.floor(rand() * REAL_EVENTS.length)];
-      base = this.event.t; spread = this.event.spread;
+      const i = Math.floor(rand() * REAL_EVENTS.length);
+      this.event = REAL_EVENTS[i];
+      pool = uniq([EVENT_ROSTERS[i]]);
     } else if (level === 'Adaptive') {
-      base = clamp(this.mem.level ?? 1, 0, 3); // moved after every match toward close games
+      // moved after every match toward close games; teams near that level are likeliest
+      const want = tToEpa(clamp(this.mem.level ?? 1, 0, 4));
+      pool = POOLS.all().filter((e) => Math.abs(e.epa - want) < Math.max(25, want * 0.3) && !ELITE[e.team]);
     } else {
-      base = Math.max(0, LEVELS.findIndex((l) => l.name === level));
-      if (base === 0 && level !== 'Easy') base = 1;
+      pool = (POOLS[level] || POOLS.Medium)();
     }
+    if (pool.length < 6) pool = POOLS.all().filter((e) => !ELITE[e.team]);
     this.levelName = level;
-    this.base = base;
     const gaussR = () => { let u = rand() || 1e-6, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
     const used = new Set([201]);
-    const team = () => { let n; do n = 100 + Math.floor(rand() * 11400); while (used.has(n)); used.add(n); return n; };
-    const add = (al, slot) => {
-      const typeName = TYPE_NAMES[Math.floor(rand() * TYPE_NAMES.length)];
+    const draw = () => {
+      const left = pool.filter((e) => !used.has(e.team));
+      const e = left[Math.floor(rand() * left.length)] || entry([100 + Math.floor(rand() * 9000), 'Team', 80, 0, 10]);
+      used.add(e.team);
+      return e;
+    };
+    // what kind of robot: a team that climbs a lot is a Climber; weak robots often play defense or feed
+    const typeFor = (e) => {
+      if (e.tower > 3) return 'Climber';
+      const t = epaToT(e.epa);
+      if (t < 0.7 && rand() < 0.5) return rand() < 0.5 ? 'Defender' : 'Feeder';
+      const r = rand();
+      return r < 0.2 ? 'Feeder' : r < 0.3 ? 'Defender' : 'Shooter';
+    };
+    const add = (al, slot, e) => {
+      const elite = ELITE[e.team];
+      const typeName = elite ? 'Shooter' : typeFor(e);
       const pers = {
         aggression: clamp(TYPES[typeName].aggression + (rand() - 0.5) * 0.5, 0, 1),
         risk: rand(),
@@ -357,18 +414,33 @@ export class AIPlayers {
         range: TYPES[typeName].range[0] + rand() * (TYPES[typeName].range[1] - TYPES[typeName].range[0]),
         jitter: 0.15 + rand() * 0.25,
       };
-      const lv = levelAt(base + gaussR() * spread);
-      const b = new Bot(this.scene, this.RAPIER, this.world, al, team(), typeName, lv, pers);
+      const lv = levelAt(epaToT(e.epa) + gaussR() * spread);
+      // the ones whose robots we know: their real shot rate, shooting on the move
+      if (elite) { lv.fire = elite.bps / TYPES.Shooter.fire; lv.aim = Math.min(lv.aim, 1.5); }
+      const b = new Bot(this.scene, this.RAPIER, this.world, al, e.team, typeName, lv, pers);
       b.slot = slot;
-      // climbers go for the top rung (if skilled enough); a few other robots can do LEVEL 1
-      const skill = lv.t > 2.2 ? 2 : lv.t < 0.8 ? 0 : 1;
-      b.climbLevel = typeName === 'Climber' ? 1 + Math.min(2, skill + (rand() < 0.4 ? 1 : 0)) : rand() < 0.3 ? 1 : 0;
+      b.name = e.name;
+      b.epa = e.epa;
+      b.onMove = !!elite?.onMove || lv.t > 3.2;
+      b.sloppy = rand(); // how careful it is about fouls this match
+      // TOWER: from how many TOWER points the team really averages
+      b.climbLevel = e.tower > 20 ? 3 : e.tower > 9 ? 2 : e.tower > 1.5 ? 1 : 0;
+      if (typeName === 'Climber' && !b.climbLevel) b.climbLevel = 1;
       this.bots.push(b);
+      if (elite) this.elites.push(b);
     };
     // your teammates take the other driver stations; the opponents line up across the field
     const free = [0, 1, 2].filter((s) => s !== station);
-    for (let i = 0; i < mine - 1; i++) add(alliance, free[i]);
-    for (let i = 0; i < theirs; i++) add(other(alliance), i);
+    for (let i = 0; i < mine - 1; i++) add(alliance, free[i], draw());
+    // Challenging: a chance to draw one (or two) of the world's best as opponents
+    const elites = [];
+    if (level === 'Challenging') {
+      const r = rand();
+      const n = Math.min(theirs, r < 0.15 ? 2 : r < 0.6 ? 1 : 0);
+      const names = Object.keys(ELITE).map(Number).sort(() => rand() - 0.5);
+      for (let i = 0; i < n; i++) { const e = entry(TOP.find((x) => x[0] === names[i])); used.add(e.team); elites.push(e); }
+    }
+    for (let i = 0; i < theirs; i++) add(other(alliance), i, elites[i] || draw());
     // each alliance's coach picks a strategy: the opponents learn which ones beat you
     this.coach = {};
     for (const al of [BLUE, RED]) {
@@ -378,7 +450,8 @@ export class AIPlayers {
         let best = -1;
         for (const s of STRATEGIES) { const st = this.mem.strat[s]; const v = betaSample(st.a, st.b); if (v > best) { best = v; strat = s; } }
       }
-      this.coach[al] = { strat, t: 0 };
+      // how much this alliance likes to play defense, different every match
+      this.coach[al] = { strat, t: 0, defense: rand() };
     }
     this.you = { lastPos: null, sideT: [0, 0], shots: 0, scored: 0, inNeutralT: 0, carryT: 0 };
     this.reset();
@@ -447,6 +520,8 @@ export class AIPlayers {
   step(dt, robot, game, match) {
     if (!this.bots.length) return;
     const ctx = this.context(robot, match);
+    this.ctx = ctx;
+    this.youPos = robot.body.translation();
     this.watchYou(robot, game, dt);
     const disabled = match?.disabled;
     for (const al of [BLUE, RED]) this.coachThink(al, ctx, game, dt);
@@ -464,30 +539,55 @@ export class AIPlayers {
   }
 
   /**
-   * Pinning: an opposing AI robot holding you (or anyone) in place for more than 3 s is a foul,
-   * and it has to back off.
+   * The referee, for every robot on the field (you included):
+   *  - pinning an opposing robot that's trying to move for more than 3 s: MINOR FOUL. A careful
+   *    driver backs off before that; a sloppy one doesn't.
+   *  - touching an opposing robot that's on its TOWER in END GAME: MAJOR FOUL.
+   *  - an AI defender slamming into a robot at full speed: sometimes MINOR (excessive contact).
+   * How sloppy each AI robot is gets rolled every match.
    */
   referee(robot, game, dt) {
     if (game.match?.disabled) return;
-    const rp = robot.body.translation();
+    const endgame = this.ctx?.endgame;
     const rv = robot.body.linvel();
-    const movers = [{ p: rp, v: rv, al: this.alliance, r: robot.halfL }, ...this.bots.map((o) => ({ p: o.pos(), v: o.body.linvel(), al: o.alliance, r: o.halfL, bot: o }))];
-    for (const b of this.bots) {
-      const p = b.pos();
+    const you = { p: robot.body.translation(), v: rv, al: this.alliance, r: robot.halfL, team: 201, you: true, wants: Math.hypot(robot.cmd?.vx || 0, robot.cmd?.vz || 0) > 0.8 };
+    const all = [you, ...this.bots.map((o) => ({ p: o.pos(), v: o.body.linvel(), al: o.alliance, r: o.halfL, team: o.team, bot: o, wants: Math.hypot(o.cmdX || 0, o.cmdZ || 0) > 1 }))];
+    for (const m of all) {
+      const who = m.bot || this.you;
       let pinning = false;
-      for (const m of movers) {
-        if (m.bot === b || m.al === b.alliance) continue;
-        const d = Math.hypot(m.p.x - p.x, m.p.z - p.z);
-        if (d < b.halfL + m.r + 0.12 && Math.hypot(m.v.x, m.v.z) < 0.35 && b.task.kind === 'defend') pinning = true;
+      who.rcool = Math.max(0, (who.rcool || 0) - dt);
+      for (const o of all) {
+        if (o === m || o.al === m.al) continue;
+        const dx = o.p.x - m.p.x, dz = o.p.z - m.p.z, d = Math.hypot(dx, dz);
+        if (d > m.r + o.r + 0.14) continue;
+        // a robot on its TOWER in END GAME is protected
+        if (endgame && o.bot?.climbY > 0.02) {
+          const hit = (o.bot.hitBy ||= new Set());
+          if (!hit.has(m.team)) { hit.add(m.team); this.foul(game, m, 'MAJOR', 'contact with a robot on its TOWER in END GAME'); }
+          continue;
+        }
+        // pinning: they want to move and can't, and we're the one leaning on them
+        if (Math.hypot(o.v.x, o.v.z) < 0.35 && o.wants && (m.you || m.bot.task.kind === 'defend')) pinning = true;
+        // excessive contact: a defender arriving at full speed
+        if (m.bot?.task.kind === 'defend' && !who.rcool) {
+          const closing = ((m.v.x - o.v.x) * dx + (m.v.z - o.v.z) * dz) / (d || 1);
+          if (closing > 3.2) { who.rcool = 6; if (Math.random() < m.bot.sloppy * 0.35) this.foul(game, m, 'MINOR', 'excessive contact'); }
+        }
       }
-      b.pinT = pinning ? (b.pinT || 0) + dt : Math.max(0, (b.pinT || 0) - dt);
-      if (b.pinT > 3) {
-        b.pinT = 0;
-        b.fouls = (b.fouls || 0) + 1;
-        game.foulBy(b.alliance, b.team, 'MINOR', 'G420', 'pinning for more than 3 seconds');
-        b.task = { kind: 'unstick', t: 0, dir: { x: Math.random() - 0.5, z: Math.random() - 0.5 }, until: 1.2 };
+      who.pinT = pinning ? (who.pinT || 0) + dt : Math.max(0, (who.pinT || 0) - dt * 2);
+      // a careful AI driver counts in their head and backs off around 2.5 s
+      if (m.bot && who.pinT > 2.3 + m.bot.sloppy * 0.4 && m.bot.sloppy < 0.55) { who.pinT = 0; m.bot.backOff = 1.2; continue; }
+      if (who.pinT > 3) {
+        who.pinT = 0;
+        this.foul(game, m, 'MINOR', 'pinning for more than 3 seconds');
+        if (m.bot) m.bot.task = { kind: 'unstick', t: 0, dir: { x: Math.random() - 0.5, z: Math.random() - 0.5 }, until: 1.2 };
       }
     }
+  }
+
+  foul(game, m, kind, why) {
+    if (m.bot) m.bot.fouls = (m.bot.fouls || 0) + 1;
+    game.foulBy(m.al, m.team, kind, '', why);
   }
 
   snapshot() { for (const b of this.bots) b.snapshot(); }
@@ -508,16 +608,28 @@ export class AIPlayers {
     const oppBots = this.bots.filter((b) => b.alliance === opp);
     // pick at most one defender, and only when it pays: the opponent is out-scoring, our HUB is
     // off, or the strategy says to deny
+    // Defense mostly happens during the other alliance's shift: our HUB is off, theirs counts, so
+    // the best use of a robot is slowing down whoever is shooting. How much an alliance likes to
+    // defend is rolled per match (c.defense).
     let defender = null;
-    const wantDefense = c.strat === 'deny' || (c.strat === 'balanced' && (diff < -6 || youThreat > 25)) || (!ctx.active(al) && c.strat !== 'race');
-    if (wantDefense && (mine.length > 1 || c.strat === 'deny' || !ctx.active(al))) {
+    const theirShift = !ctx.active(al) && ctx.active(opp);
+    let wantDefense = false;
+    if (c.strat === 'deny') wantDefense = c.defense > 0.15;
+    else if (theirShift) wantDefense = c.defense > 0.3 && c.strat !== 'race' || c.defense > 0.75;
+    else if (c.strat === 'balanced') wantDefense = c.defense > 0.6 && (diff < -10 || youThreat > 30);
+    if (wantDefense && (mine.length > 1 || theirShift || c.strat === 'deny')) {
       defender = mine.reduce((a, b) => (b.p.aggression - b.load * 0.02 > a.p.aggression - a.load * 0.02 ? b : a));
-      if (defender.p.aggression < 0.35 && c.strat !== 'deny') defender = null;
+      if (defender.p.aggression + c.defense < 0.6) defender = null;
     }
-    // who to guard: the biggest threat on the other alliance (you, or one of their AI)
+    // who to guard: the biggest threat on the other alliance (you, or one of their AI). Your own
+    // teammates never pick you. A robot hanging on its TOWER is off limits.
     let target = null, best = -1;
     if (al !== this.alliance) { target = { you: true }; best = youThreat; }
-    for (const ob of oppBots) { const t = ob.scored * 1.2 + ob.load * 0.5; if (t > best) { best = t; target = { bot: ob }; } }
+    for (const ob of oppBots) {
+      if (ob.climbY > 0) continue;
+      const t = ob.scored * 1.2 + ob.load * 0.5;
+      if (t > best) { best = t; target = { bot: ob }; }
+    }
     for (const b of mine) {
       b.role = b === defender ? 'defend' : 'score';
       b.guard = b === defender ? target : null;
@@ -552,6 +664,11 @@ export class AIPlayers {
       if (!active && strat === 'hoard') u *= 1.3;
       options.push({ kind: 'collect', u });
     }
+    // pass: our HUB is off, so lob what we pick up in the NEUTRAL ZONE back to our ALLIANCE ZONE,
+    // ready for when it turns on
+    if (!active && b.load >= 3 && soon > 4 && !this.inZone(p, al)) {
+      options.push({ kind: 'pass', u: 0.35 + full * 1.1 + (strat === 'hoard' ? 0.15 : 0) });
+    }
     // defend: the coach's call, weighed by personality
     if (b.role === 'defend' && b.guard) options.push({ kind: 'defend', u: 0.7 + b.p.aggression * 0.6 - full * 0.3 });
     // feed the OUTPOST: hand FUEL to our human player while our HUB is off (feeders love this)
@@ -579,6 +696,9 @@ export class AIPlayers {
     if (pick !== b.task.kind || this.taskStale(b)) this.startTask(b, pick, ctx, game);
   }
 
+  /** Inside this alliance's ALLIANCE ZONE? */
+  inZone(p, al) { return (al === BLUE ? -p.x : p.x) > HALF_L - ALLIANCE_ZONE_DEPTH; }
+
   taskStale(b) {
     const t = b.task;
     if (t.kind === 'collect') return !t.ball || !t.ball.active || t.ball.inRobot || t.ball.body.translation().y > 0.3;
@@ -601,6 +721,10 @@ export class AIPlayers {
       this.plan(b, spot.x, spot.z);
     } else if (kind === 'defend') {
       b.task.replan = 0;
+    } else if (kind === 'pass') {
+      // a spot on the floor of our ALLIANCE ZONE, clear of the HUB
+      b.task.target = fieldToWorld(ALLIANCE_ZONE_DEPTH * (0.35 + Math.random() * 0.4), HALF_W + (Math.random() - 0.5) * 4.5, al);
+      b.path = null;
     } else if (kind === 'feed') {
       const o = fieldToWorld(OUTPOST.depth + 0.55, OUTPOST.fy + 0.1, al);
       b.task.spot = o;
@@ -645,6 +769,8 @@ export class AIPlayers {
       const [i, k] = this.nav.idx(q.x, q.z);
       if (!this.nav.free(i, k)) continue;
       let s = Math.hypot(q.x - p.x, q.z - p.z);
+      // while our HUB is off, leave the ones at home for later and gather from the middle
+      if (this.ctx && !this.ctx.active(al) && this.inZone(q, al)) s += 3;
       s += (Math.sign(q.z) === b.p.side * (al === BLUE ? 1 : -1) ? -0.6 : 0.6) * (1 - b.p.risk * 0.5);
       for (const o of this.bots) if (o !== b && o.task.ball) { const t = o.task.ball.body.translation(); if (Math.hypot(t.x - q.x, t.z - q.z) < 1.5) s += 1.2; }
       if (s < bs) { bs = s; best = ball; }
@@ -667,6 +793,8 @@ export class AIPlayers {
       if (!this.nav.free(i, k)) continue;
       let s = Math.hypot(x - b.pos().x, z - b.pos().z) * 0.3;
       for (const o of this.bots) if (o !== b && o.task.spot) s += Math.max(0, 2 - Math.hypot(o.task.spot.x - x, o.task.spot.z - z)) * 3;
+      // a teammate leaves you room to shoot
+      if (al === this.alliance && this.youPos) s += Math.max(0, 2.8 - Math.hypot(this.youPos.x - x, this.youPos.z - z)) * 4;
       if (s < bs) { bs = s; best = { x, z }; }
     }
     return best || { x: hub.x + toWall * 2.5, z: hub.z };
@@ -699,6 +827,11 @@ export class AIPlayers {
       const d = Math.hypot(p.x - t.spot.x, p.z - t.spot.z);
       if (d < 1.4) face = Math.atan2(-(hub.z - p.z), hub.x - p.x);
       if (t.kind === 'score' && d < 0.6) this.shoot(b, ctx, game, dt);
+      // the best robots don't stop to shoot: they fire as soon as they're in the zone and in range
+      else if (t.kind === 'score' && b.onMove && this.inZone(p, b.alliance) && Math.hypot(p.x - hub.x, p.z - hub.z) < 5.5) {
+        face = Math.atan2(-(hub.z - p.z), hub.x - p.x);
+        this.shoot(b, ctx, game, dt);
+      }
     } else if (t.kind === 'defend') {
       const g = b.guard;
       let gp = null;
@@ -710,14 +843,18 @@ export class AIPlayers {
         const dx = hub.x - gp.x, dz = hub.z - gp.z, d = Math.hypot(dx, dz) || 1;
         const lead = Math.min(1.1, d * 0.4);
         tx = gp.x + (dx / d) * lead; tz = gp.z + (dz / d) * lead;
-        // don't follow them into their own ALLIANCE ZONE for long (protected), and never the HUB
-        const sign = b.alliance === BLUE ? 1 : -1;
-        if (sign * tx > HALF_L - ALLIANCE_ZONE_DEPTH - 0.4) tx = sign * (HALF_L - ALLIANCE_ZONE_DEPTH - 0.4);
+        // follow them anywhere, even into their ALLIANCE ZONE while they shoot (the nav grid keeps
+        // it off the HUB). A careful driver backs off before a pin turns into a foul.
+        if (b.backOff > 0) { b.backOff -= dt; const k = 1.6 / (Math.hypot(p.x - gp.x, p.z - gp.z) || 1); tx = p.x + (p.x - gp.x) * k; tz = p.z + (p.z - gp.z) * k; }
         face = Math.atan2(-(gp.z - p.z), gp.x - p.x);
         t.replan -= dt;
         if (t.replan <= 0) { t.replan = 0.6; this.plan(b, tx, tz); }
         if (b.path && Math.hypot(tx - p.x, tz - p.z) < 1.5) b.path = null;
       }
+    } else if (t.kind === 'pass' && t.target) {
+      face = Math.atan2(-(t.target.z - p.z), t.target.x - p.x);
+      this.lob(b, t.target, dt);
+      if (b.load <= 0 || ctx.active(b.alliance)) b.thinkT = 0, b.task = { kind: 'idle' };
     } else if (t.kind === 'feed' && t.spot) {
       arrive = true;
       const d = Math.hypot(p.x - t.spot.x, p.z - t.spot.z);
@@ -772,12 +909,22 @@ export class AIPlayers {
       vx = (dx / d) * s; vz = (dz / d) * s;
       if (face === null && d > 0.3) face = Math.atan2(-dz, dx);
     }
-    // keep clear of other robots (and you), unless we're defending
+    // keep clear of other robots (and you), unless we're defending. Your teammates give you a
+    // wide berth and stay out of the line between you and the HUB while you're shooting.
     if (t.kind !== 'defend') {
-      const others = [...this.bots.filter((o) => o !== b).map((o) => o.pos()), ctx.robot.body.translation()];
-      for (const o of others) {
+      const mate = b.alliance === this.alliance;
+      const others = [...this.bots.filter((o) => o !== b).map((o) => ({ q: o.pos(), r: 1.5 })), { q: ctx.robot.body.translation(), r: mate ? 2.4 : 1.5 }];
+      for (const { q: o, r } of others) {
         const dx = p.x - o.x, dz = p.z - o.z, d = Math.hypot(dx, dz);
-        if (d < 1.5 && d > 0.01) { const k = (1.5 - d) * 2.2; vx += (dx / d) * k; vz += (dz / d) * k; }
+        if (d < r && d > 0.01) { const k = (r - d) * 2.2; vx += (dx / d) * k; vz += (dz / d) * k; }
+      }
+      if (mate && game.aim) {
+        const a = ctx.robot.body.translation(), h = game.aim.target || hubCenter(this.alliance);
+        const sx = h.x - a.x, sz = h.z - a.z, L2 = sx * sx + sz * sz || 1;
+        const u = clamp(((p.x - a.x) * sx + (p.z - a.z) * sz) / L2, 0, 1);
+        const cx = a.x + sx * u, cz = a.z + sz * u;
+        const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
+        if (d < 1.3 && u > 0.05 && u < 0.98) { const k = (1.3 - d) * 3 / (d || 1); vx += dx * k || sz * 0.5; vz += dz * k || -sx * 0.5; }
       }
     }
     // reaction delay: the command catches up over the level's reaction time
@@ -841,7 +988,9 @@ export class AIPlayers {
     const den = 2 * Math.cos(th) ** 2 * (d * Math.tan(th) - h);
     if (den <= 0) return;
     let v = Math.sqrt((G * d * d) / den);
-    const err = b.level.aim * deg;
+    // on the move it keeps firing, just a little less accurately
+    const lv0 = b.body.linvel();
+    const err = b.level.aim * deg * (1 + Math.min(0.5, Math.hypot(lv0.x, lv0.z) * 0.12));
     const yawN = gauss() * err;
     v *= 1 + gauss() * (0.02 + b.level.aim * 0.006);
     const cy = Math.cos(yawN), sy = Math.sin(yawN);
@@ -851,6 +1000,32 @@ export class AIPlayers {
     this.fuel.enable(ball, ex, ey, ez, ux * hv, v * Math.sin(thN), uz * hv);
     ball.shot = null;
     ball.bot = b;
+  }
+
+  /** Lob one FUEL to a spot on the floor (passing back to our ALLIANCE ZONE). */
+  lob(b, target, dt) {
+    b.fireT -= dt;
+    if (b.load <= 0 || b.fireT > 0) return;
+    const p = b.pos();
+    const want = Math.atan2(-(target.z - p.z), target.x - p.x);
+    if (Math.abs(wrap(want - b.yaw())) > 12 * deg) return;
+    const ball = this.fuel.takeSpare();
+    if (!ball) return;
+    b.fireT = 1 / (b.level.fire * b.type.fire * 1.15 * (0.85 + Math.random() * 0.3));
+    b.load--;
+    const ex = p.x, ez = p.z, ey = 0.62;
+    const dx = target.x - ex, dz = target.z - ez, d = Math.hypot(dx, dz) || 1;
+    const th = 50 * deg;
+    // lands on the floor: solve with the drop from the shooter height
+    const den = 2 * Math.cos(th) ** 2 * (d * Math.tan(th) + ey);
+    const v = Math.sqrt((G * d * d) / den) * (1 + gauss() * 0.06);
+    const yawN = gauss() * b.level.aim * 1.5 * deg;
+    const cy = Math.cos(yawN), sy = Math.sin(yawN);
+    const ux = (dx / d) * cy - (dz / d) * sy, uz = (dx / d) * sy + (dz / d) * cy;
+    const hv = v * Math.cos(th);
+    this.fuel.enable(ball, ex, ey, ez, ux * hv, v * Math.sin(th), uz * hv);
+    ball.shot = null;
+    ball.bot = null;
   }
 
   /** A FUEL went into a HUB: credit the robot that shot it. */
@@ -871,7 +1046,7 @@ export class AIPlayers {
     for (const s of STRATEGIES) { this.mem.strat[s].a = 1 + (this.mem.strat[s].a - 1) * 0.9; this.mem.strat[s].b = 1 + (this.mem.strat[s].b - 1) * 0.9; }
     // Adaptive difficulty: toward close matches
     const margin = yours - theirs;
-    this.mem.level = clamp((this.mem.level ?? 1) + clamp(margin / 60, -0.5, 0.5), 0, 3);
+    this.mem.level = clamp((this.mem.level ?? 1) + clamp(margin / 60, -0.5, 0.5), 0, 4);
     const y = this.you;
     const side = y.sideT[1] - y.sideT[0];
     this.mem.you.side = this.mem.you.side * 0.7 + Math.sign(side) * 0.3;

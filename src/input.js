@@ -31,7 +31,8 @@ export const ACTIONS = {
   autoShoot: { label: 'Auto shoot', pad: { b: PAD.RT }, keys: ['KeyK'] },
   autoPass: { label: 'Auto pass', pad: { b: PAD.RB }, keys: ['KeyE'] },
   manualShoot: { label: 'Free shoot (no auto-aim)', pad: { b: PAD.LB }, keys: ['KeyQ'] },
-  climb: { label: 'Climb', pad: { b: PAD.DOWN }, keys: ['KeyC'] },
+  // 201 doesn't climb, so MoSim's climb button dumps the hopper instead
+  deload: { label: 'Deload (dump FUEL out the intake)', pad: { b: PAD.DOWN }, keys: ['KeyC'] },
   special1: { label: 'Robot special 1', pad: { b: PAD.Y }, keys: ['KeyV'] },
   special2: { label: 'Robot special 2', pad: { b: PAD.X }, keys: ['KeyI'] },
   special3: { label: 'Robot special 3', pad: { b: PAD.B }, keys: ['KeyO'] },
