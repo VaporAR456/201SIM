@@ -463,6 +463,7 @@ export class AIPlayers {
 
   /** Back to the starting spots with the preload. */
   reset() {
+    this.g403 = new Map();
     for (const b of this.bots) {
       const p = fieldToWorld(0.95, STATIONS[b.slot].fy, b.alliance);
       const p2 = fieldToWorld(ALLIANCE_ZONE_DEPTH - 0.6, STATIONS[b.slot].fy, b.alliance);
@@ -577,6 +578,9 @@ export class AIPlayers {
   referee(robot, game, dt) {
     if (game.match?.disabled) return;
     const endgame = this.ctx?.endgame;
+    const auto = this.ctx?.match?.on && this.ctx.match.phase().name === 'AUTO';
+    const now = this.ctx?.match?.t ?? 0;
+    this.g403 ||= new Map();
     const rv = robot.body.linvel();
     const you = { p: robot.body.translation(), v: rv, al: this.alliance, r: robot.halfL, team: 201, you: true, wants: Math.hypot(robot.cmd?.vx || 0, robot.cmd?.vz || 0) > 0.8 };
     const all = [you, ...this.bots.map((o) => ({ p: o.pos(), v: o.body.linvel(), al: o.alliance, r: o.halfL, team: o.team, bot: o, wants: Math.hypot(o.cmdX || 0, o.cmdZ || 0) > 1 }))];
@@ -588,6 +592,16 @@ export class AIPlayers {
         if (o === m || o.al === m.al) continue;
         const dx = o.p.x - m.p.x, dz = o.p.z - m.p.z, d = Math.hypot(dx, dz);
         if (d > m.r + o.r + 0.14) continue;
+        // G403: in AUTO, a robot whose BUMPERS are all the way across the CENTER LINE may not
+        // touch an opponent. A MAJOR FOUL for each new contact.
+        const across = m.al === BLUE ? m.p.x - m.r > 0 : m.p.x + m.r < 0;
+        if (auto && across) {
+          const key = `${m.team}>${o.team}`;
+          // a new contact: they'd been apart for at least a second
+          const last = this.g403.get(key);
+          this.g403.set(key, now);
+          if (last === undefined || now - last > 1) this.foul(game, m, 'MAJOR', 'contact across the CENTER LINE in AUTO', 'G403');
+        }
         // a robot on its TOWER in END GAME is protected
         if (endgame && o.bot?.climbY > 0.02) {
           const hit = (o.bot.hitBy ||= new Set());
@@ -613,9 +627,9 @@ export class AIPlayers {
     }
   }
 
-  foul(game, m, kind, why) {
+  foul(game, m, kind, why, rule = '') {
     if (m.bot) m.bot.fouls = (m.bot.fouls || 0) + 1;
-    game.foulBy(m.al, m.team, kind, '', why);
+    game.foulBy(m.al, m.team, kind, rule, why);
   }
 
   snapshot() { for (const b of this.bots) b.snapshot(); }
@@ -794,6 +808,8 @@ export class AIPlayers {
       if (q.y > 0.2 || Math.abs(q.x) > HALF_L - 0.3 || Math.abs(q.z) > HALF_W - 0.3) continue;
       // stay out of the other alliance's zone
       if (-sign * q.x > HALF_L - ALLIANCE_ZONE_DEPTH) continue;
+      // in AUTO, don't go fully across the CENTER LINE (G403)
+      if (this.ctx?.match?.on && this.ctx.match.phase().name === 'AUTO' && -sign * q.x > 0.3) continue;
       const [i, k] = this.nav.idx(q.x, q.z);
       if (!this.nav.free(i, k)) continue;
       let s = Math.hypot(q.x - p.x, q.z - p.z);

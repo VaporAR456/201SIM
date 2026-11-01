@@ -49,7 +49,9 @@ export const ROBOT_201 = {
   preload: 8,
   shooter: {
     facing: -1,
-    exit: [-0.22, 0.66, 0], // where FUEL leaves the shooter, robot frame (x forward, y up)
+    exit: [-0.22, 0.66, 0], // middle of the shooter, robot frame (x forward, y up, z to the side)
+    // the double shooter: two exits side by side, firing together
+    exits: [[-0.22, 0.66, -0.13], [-0.22, 0.66, 0.13]],
     maxExitSpeed: 9.5, // m/s at normal power; passing multiplies this by the Pass power boost
     angleNear: 72, nearDist: 1.5, // steep lob up close...
     angleFar: 52, farDist: 6, // ...flatter from far away

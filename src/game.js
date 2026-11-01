@@ -201,8 +201,10 @@ export class Game {
     this.fireT -= dt;
     this.robot.spinIndexer(shooting && this.held > 0 ? dt : 0);
     if (this.aim && this.aim.ready && this.held > 0 && this.fireT <= 0 && !(this.match?.countdown > 0)) {
-      this.launch(this.aim);
-      this.fireT = 1 / this.settings.fireRate;
+      // both shooters fire together (one ball each, while there are two to give)
+      const ex = this.cfg.shooter.exits || [this.cfg.shooter.exit];
+      for (const e of ex) if (this.held > 0) this.launch(this.aim, e);
+      this.fireT = 1 / (this.settings.fireRatePer ?? 5);
     }
     this.firing = !!(this.aim && this.aim.ready && this.held > 0);
 
@@ -408,9 +410,9 @@ export class Game {
   }
 
   // ------------------------------------------------------------ ballistics
-  exitPoint() {
+  exitPoint(at) {
     const r = this.robot;
-    const [ex, ey, ez] = this.cfg.shooter.exit;
+    const [ex, ey, ez] = at || this.cfg.shooter.exit;
     const p = r.body.translation();
     const yaw = r.yaw();
     const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -524,12 +526,12 @@ export class Game {
     this.inside.splice(best, 1); this.insideLocal.splice(best, 1);
   }
 
-  launch(aim) {
+  launch(aim, exit) {
     const b = this.feedBall();
     if (!b) return;
     b.inRobot = false;
     const sh = this.cfg.shooter;
-    const e = this.exitPoint();
+    const e = this.exitPoint(exit);
     const v = this.robot.body.linvel();
     // a little spread so not every shot is perfect
     // Auto aim points the shooter at the HUB; it doesn't make every ball go in. Real shots

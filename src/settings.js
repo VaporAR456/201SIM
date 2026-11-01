@@ -23,9 +23,9 @@ export const SETTING_DEFS = {
     label: 'Pass power boost', unit: '%', min: 100, max: 200, step: 5, def: 140,
     help: 'How much harder the shooter spins when passing, so you can reach your alliance zone from across the field. 100% means no boost.',
   },
-  fireRate: {
-    label: 'Fire rate', unit: ' FUEL/s', min: 2, max: 15, step: 0.5, def: 8,
-    help: 'How fast the spindexer feeds FUEL into the shooter.',
+  fireRatePer: {
+    label: 'Fire rate per shooter', unit: ' FUEL/s', min: 1, max: 10, step: 0.5, def: 5,
+    help: '201 has a double shooter: two exits that fire side by side. This is how fast the spindexer feeds each one, so the total is twice this.',
   },
   capacity: {
     label: 'Hopper capacity', unit: ' FUEL', min: 10, max: 80, step: 1, def: 40,
