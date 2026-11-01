@@ -11,7 +11,7 @@ import { Robot } from './robot.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
-import { Fuel } from './fuel.js';
+import { Fuel, hubCenter } from './fuel.js';
 import { Game } from './game.js';
 import { loadSettings, buildSettingsPanel } from './settings.js';
 import { Match, clock } from './match.js';
@@ -46,11 +46,13 @@ const ui = {
   sbPhase: document.getElementById('sb-phase'),
   sbLeft: document.getElementById('sb-left'),
   results: document.getElementById('results'),
+  human: document.getElementById('hud-human'),
   resultsBody: document.getElementById('results-body'),
 };
 
 const settings = { alliance: BLUE, station: 1, mode: 'match', cam: 'ds' };
 try { settings.cam = localStorage.getItem('201sim.startCam') || 'ds'; } catch { /* default */ }
+try { settings.preload = localStorage.getItem('201sim.preload') !== 'off'; } catch { settings.preload = true; }
 
 async function init() {
   await RAPIER.init();
@@ -160,6 +162,7 @@ async function init() {
     robot.reset(p.x, p.z, p.yaw);
     robot.fieldForward = settings.alliance === BLUE ? 0 : Math.PI;
     robot.bumperMat.color.set(settings.alliance === BLUE ? 0x1f6fff : 0xe8322f);
+    game.preloadOn = settings.preload;
     game.reset();
     match.reset(settings.mode === 'match');
     ui.results.hidden = true;
@@ -178,6 +181,12 @@ async function init() {
     refreshMenu();
   }));
   modeBtns.forEach((b) => b.addEventListener('click', () => { settings.mode = b.dataset.mode; refreshMenu(); }));
+  const preloadBtns = document.querySelectorAll('[data-preload]');
+  preloadBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.preload = b.dataset.preload === 'on';
+    try { localStorage.setItem('201sim.preload', settings.preload ? 'on' : 'off'); } catch { /* not saved */ }
+    refreshMenu(); restart();
+  }));
   // after a match: shrink the score bar back and keep driving in free play, or go again
   const keepDriving = () => {
     ui.results.hidden = true;
@@ -198,6 +207,7 @@ async function init() {
     stationBtns.forEach((b) => b.classList.toggle('on', +b.dataset.station === settings.station));
     modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
     camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
+    preloadBtns.forEach((b) => b.classList.toggle('on', (b.dataset.preload === 'on') === settings.preload));
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));
@@ -366,6 +376,7 @@ async function init() {
         .map(([, b]) => b.label);
       setText(ui.actions, on.join(' · '));
       setText(ui.held, `${game.held} / ${game.capacity}`);
+      setText(ui.human, String(game.human.stash));
       setText(ui.net, game.netBroken ? 'NET BROKEN' : game.strain > 1 ? 'NET STRAINING: back off!' : '');
       updateScorebar();
       const a = game.aim;
@@ -459,14 +470,29 @@ async function init() {
   }
 
   let camYaw = 0;
+  let camDist = 3.4;
+  let menuT = 0.6;
+  const hubs = [hubCenter(BLUE), hubCenter(RED)];
+  // the HUB itself plus the net that leans out over its NEUTRAL ZONE side (up to ~1 m out, 3 m up)
+  const camBlocked = (x, z) => hubs.some((h) => {
+    const dz = Math.abs(z - h.z);
+    if (dz > 0.85) return false;
+    const out = (x - h.x) * -Math.sign(h.x); // toward the field center
+    return out > -0.75 && out < 1.05;
+  });
   let camFlip = false; // false: third-person camera behind the robot (shooter side), true: intake side
   function updateCamera(dt) {
     if (camera.userData.freeze) return; // debugging: hold a hand-placed camera
     const p = tmp.copy(robot.root.position); // the drawn (blended) pose, so the camera never jitters against the model
     const allianceSign = settings.alliance === BLUE ? -1 : 1;
-    const view = state === 'menu' ? settings.station : camIndex;
-    const mode = view < THIRD ? 0 : view === THIRD ? 1 : 2;
-    if (mode === 0) {
+    const view = camIndex;
+    const mode = state === 'menu' ? 3 : view < THIRD ? 0 : view === THIRD ? 1 : 2;
+    if (mode === 3) {
+      // main menu: a slow orbit high over the field
+      menuT += dt * 0.06;
+      camPos.set(Math.cos(menuT) * 11, 5.5, Math.sin(menuT) * 7.5);
+      camLook.set(0, 0.3, 0);
+    } else if (mode === 0) {
       // standing behind the driver station glass, turning to follow the robot
       const st = STATIONS[view];
       const ds = fieldToWorld(0, st.fy, settings.alliance);
@@ -479,10 +505,15 @@ async function init() {
       let d = robot.yaw() - camYaw;
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
-      camYaw += d * (1 - Math.exp(-dt * 2.5));
+      // swings round faster while auto-aim is turning the robot to shoot
+      camYaw += d * (1 - Math.exp(-dt * (game.aim ? 9 : 2.5)));
       const dir = camFlip ? 1 : -1; // -1: behind the robot's back
       const cx = Math.cos(camYaw) * dir, cz = -Math.sin(camYaw) * dir;
-      camPos.set(p.x + cx * 3.4, 2.0, p.z + cz * 3.4);
+      // never sit inside a HUB or its net: slide in closer until the spot is clear, smoothly
+      let want = 3.4;
+      while (want > 1.0 && camBlocked(p.x + cx * want, p.z + cz * want)) want -= 0.05;
+      camDist += (want - camDist) * (1 - Math.exp(-dt * (want < camDist ? 10 : 3)));
+      camPos.set(p.x + cx * camDist, 2.0, p.z + cz * camDist);
       camLook.set(p.x - cx * 2.0, 0.4, p.z - cz * 2.0);
     } else {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
@@ -499,6 +530,39 @@ async function init() {
   window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE }; // handy for debugging in the console
 }
 
+/**
+ * The CAD has colors but no textures. Give every surface real-looking grain: a fine noise and
+ * brushed streak texture, projected from the three world axes (no UVs needed), that varies the
+ * color and shine a little, so panels read as painted metal and plastic instead of flat fills.
+ */
+function addSurfaceDetail(mat) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const img = g.createImageData(256, 256);
+  const streak = new Float32Array(256);
+  for (let y = 0; y < 256; y++) streak[y] = (Math.random() - 0.5) * 0.5;
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const v = 128 + (Math.random() - 0.5) * 70 + streak[y] * 60 + Math.sin(x * 0.05 + y * 0.013) * 8;
+    const i = (y * 256 + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.max(0, Math.min(255, v)); img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uDetail = { value: tex };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNrm;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWNrm = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uDetail;\nvarying vec3 vWPos;\nvarying vec3 vWNrm;\nfloat detailAt() {\n  vec3 w = abs(normalize(vWNrm)); w = pow(w, vec3(4.0)); w /= (w.x + w.y + w.z);\n  vec3 q = vWPos * 2.5;\n  return texture2D(uDetail, q.zy).r * w.x + texture2D(uDetail, q.xz).r * w.y + texture2D(uDetail, q.xy).r * w.z;\n}')
+      .replace('#include <color_fragment>', '#include <color_fragment>\nfloat dtl = detailAt();\ndiffuseColor.rgb *= 0.86 + 0.28 * dtl;')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + (dtl - 0.5) * 0.35, 0.25, 1.0);');
+  };
+}
+
 /** Load the converted official field CAD, if it was built. Returns true when it's in the scene. */
 async function loadFieldCad(scene) {
   const url = `${import.meta.env.BASE_URL}models/field.glb`;
@@ -509,6 +573,7 @@ async function loadFieldCad(scene) {
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.loadAsync(url);
     const solid = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.15, roughness: 0.65 });
+    addSurfaceDetail(solid);
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((o) => {
       if (!o.isMesh) return;

@@ -138,6 +138,21 @@ export function buildField(scene, RAPIER, world) {
           p.x + apo * Math.sin(th), boxH + funnelH / 2, p.z + apo * Math.cos(th), th,
         );
       }
+      // the net leaning out over the NEUTRAL ZONE side (from the field CAD: bottom edge 0.19 m out
+      // at 1.66 m up, top edge 0.86 m out at 3.02 m up, 1.42 m wide). Shots that sail long bounce
+      // off it and drop back down.
+      {
+        const out = -Math.sign(p.x);
+        const b0 = [0.185, 1.66], b1 = [0.855, 3.02];
+        const len = Math.hypot(b1[0] - b0[0], b1[1] - b0[1]);
+        const tilt = Math.atan2(b1[0] - b0[0], b1[1] - b0[1]);
+        const a = -out * tilt;
+        const desc = RAPIER.ColliderDesc.cuboid(0.02, len / 2, 0.71)
+          .setTranslation(p.x + out * (b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2, p.z)
+          .setRotation({ x: 0, y: 0, z: Math.sin(a / 2), w: Math.cos(a / 2) })
+          .setFriction(0.3).setRestitution(0.1); // a net soaks up the hit
+        world.createCollider(desc, fixed);
+      }
     }
 
     // BUMPS either side of the HUB: ramps robots drive over

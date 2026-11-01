@@ -9,37 +9,46 @@
   <body>
     <div id="app"></div>
 
-    <section id="menu" class="panel">
-      <h1>201SIM <small>2026 REBUILT driver practice</small></h1>
-      <div class="row">
-        <span class="label">Mode</span>
-        <button data-mode="match">Match (2:40)</button>
-        <button data-mode="free">Free practice</button>
+    <section id="menu" class="mainmenu">
+      <div class="mm-left">
+        <div class="mm-brand">
+          <div class="mm-logo">201<span>SIM</span></div>
+          <div class="mm-tag">FRC 2026 REBUILT &middot; driver practice for Team 201</div>
+        </div>
+        <nav class="mm-nav">
+          <button id="start" class="mm-play">Play <kbd>A</kbd> <kbd>Enter</kbd></button>
+          <button id="open-controls">Controls <kbd>Y</kbd></button>
+          <button id="open-settings">Settings</button>
+        </nav>
+        <div class="mm-foot">
+          <p id="pad-status"></p>
+          <p id="gpu-info"></p>
+        </div>
       </div>
-      <div class="row">
-        <span class="label">Alliance</span>
-        <button data-alliance="blue" class="blue">Blue <kbd>X</kbd></button>
-        <button data-alliance="red" class="red">Red <kbd>B</kbd></button>
+      <div class="mm-setup">
+        <h2>Match setup</h2>
+        <div class="mm-opt">
+          <span class="label">Mode</span>
+          <div class="seg"><button data-mode="match">Match (2:40)</button><button data-mode="free">Free practice</button></div>
+        </div>
+        <div class="mm-opt">
+          <span class="label">Alliance <kbd>X</kbd> <kbd>B</kbd></span>
+          <div class="seg"><button data-alliance="blue" class="blue">Blue</button><button data-alliance="red" class="red">Red</button></div>
+        </div>
+        <div class="mm-opt">
+          <span class="label">Driver station <kbd>&larr;</kbd> <kbd>&rarr;</kbd></span>
+          <div class="seg"><button data-station="0">Left</button><button data-station="1">Center</button><button data-station="2">Right</button></div>
+        </div>
+        <div class="mm-opt">
+          <span class="label">Camera</span>
+          <div class="seg"><button data-cam="ds">Driver station</button><button data-cam="third">Third person</button><button data-cam="overhead">Overhead</button></div>
+        </div>
+        <div class="mm-opt">
+          <span class="label">Preload</span>
+          <div class="seg"><button data-preload="on">8 FUEL</button><button data-preload="off">Empty</button></div>
+        </div>
+        <p class="hint">Change camera any time with Swap camera or the pause menu.</p>
       </div>
-      <div class="row">
-        <span class="label">Driver station</span>
-        <button data-station="0">Left</button>
-        <button data-station="1">Center</button>
-        <button data-station="2">Right</button>
-        <span class="hint">D-pad ← →</span>
-      </div>
-      <div class="row">
-        <span class="label">Camera</span>
-        <button data-cam="ds">Driver station</button>
-        <button data-cam="third">Third person</button>
-        <button data-cam="overhead">Overhead</button>
-        <span class="hint">change any time: Swap camera or pause menu</span>
-      </div>
-      <button id="start" class="primary">Start practice <kbd>A</kbd> / <kbd>Enter</kbd></button>
-      <button id="open-controls">Controls <kbd>Y</kbd></button>
-      <button id="open-settings">Settings</button>
-      <p id="pad-status"></p>
-      <p id="gpu-info"></p>
     </section>
 
     <section id="controls" class="panel wide" hidden>
@@ -104,6 +113,7 @@
         <div id="hud-speed"></div>
         <div id="hud-cam"></div>
         <div>FUEL held <b id="hud-held">0</b></div>
+        <div>Human player <b id="hud-human">0</b> <span class="muted">(feed the OUTPOST)</span></div>
         <div id="hud-net"></div>
       </div>
       <div id="hud-shot"></div>

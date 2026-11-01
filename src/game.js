@@ -1,7 +1,7 @@
 // The robot's game mechanisms: expanding hopper (the agitator), intake, spindexer feed and
 // shooter, plus HUB scoring. Tuning lives in robotConfig.js (hardware) and settings.js (player).
 import * as THREE from 'three';
-import { IN, HALF_L, HALF_W, HUB, BLUE, RED, fieldToWorld, GROUP, groups, ALLIANCE_ZONE_DEPTH } from './constants.js';
+import { IN, HALF_L, HALF_W, HUB, BLUE, RED, fieldToWorld, GROUP, groups, ALLIANCE_ZONE_DEPTH, OUTPOST } from './constants.js';
 import { FUEL_RADIUS, hubCenter } from './fuel.js';
 
 const G = 9.81;
@@ -67,6 +67,7 @@ export class Game {
   }
 
   reset() {
+    this.human = { stash: 0, t: 0, thrown: 0 };
     this.netBroken = false;
     this.strain = 0;
     this.spillT = 0;
@@ -81,12 +82,12 @@ export class Game {
     this.fuel.reset();
     this.robot.setNet(true);
     // start with the hopper out just far enough for the preload
-    const pre = Math.min(this.cfg.preload, this.capacity);
+    const pre = Math.min(this.preloadCount(), this.capacity);
     this.hopperPos = Math.max(0, this.cfg.hopper.outIn + (this.cfg.hopper.box.rearX + Math.ceil(pre / 11) * 0.165 + 0.01 + 0.1 - this.robot.halfL) / 0.0254);
     this.robot.setHopper(this.hopperPos, this.cfg.hopper.outIn);
     // preloaded FUEL: real balls dropped into the hopper
     const hb = this.cfg.hopper.box;
-    const n = Math.min(this.cfg.preload, this.capacity);
+    const n = Math.min(this.preloadCount(), this.capacity);
     for (let i = 0; i < n; i++) {
       const b = this.fuel.takeSpare();
       if (!b) break;
@@ -139,7 +140,9 @@ export class Game {
     // the agitator also shakes the pile a little so FUEL finds the spindexer
     if (this.agitateT > 0 && Math.random() < dt * 8 && this.inside.length) {
       const b = this.inside[Math.floor(Math.random() * this.inside.length)];
-      b.body.applyImpulse({ x: (Math.random() - 0.5) * 0.08, y: 0.12, z: (Math.random() - 0.5) * 0.08 }, true);
+      // (a kick in velocity terms, so it's the same whatever the held FUEL's physics mass is)
+      const lv = b.body.linvel();
+      b.body.setLinvel({ x: lv.x + (Math.random() - 0.5) * 0.37, y: lv.y + 0.56, z: lv.z + (Math.random() - 0.5) * 0.37 }, true);
     }
     // The net: a full hopper won't take more. Keep ramming FUEL into it and you can cram in a
     // couple extra, but hold it there too long and the net tears off.
@@ -183,7 +186,57 @@ export class Game {
     this.clock += dt;
     this.scoreCheck(dt);
     this.returnStrays(dt);
+    this.humanPlayer(dt);
     return turn;
+  }
+
+  // ------------------------------------------------------------ human player
+  /**
+   * 201's human player stands behind the OUTPOST. FUEL you deliver there (shoot, pass or push it
+   * into the OUTPOST) goes into their stash, and they throw it into your HUB whenever it's active.
+   * Good throws, not perfect ones.
+   */
+  humanPlayer(dt) {
+    const h = this.human;
+    const al = this.alliance;
+    const sign = al === BLUE ? -1 : 1;
+    const o = fieldToWorld(OUTPOST.depth / 2, OUTPOST.fy, al);
+    const hx = OUTPOST.depth / 2 + 0.25, hz = OUTPOST.width / 2 + 0.2;
+    // collect delivered FUEL (a few checks a second is plenty)
+    h.t += dt;
+    if ((h.scanT = (h.scanT || 0) + dt) > 0.1) {
+      h.scanT = 0;
+      for (const b of this.fuel.balls) {
+        if (!b.active || b.inRobot) continue;
+        const t = b.body.translation();
+        if (Math.abs(t.x - o.x) < hx && Math.abs(t.z - o.z) < hz && t.y < 0.9) {
+          this.fuel.disable(b);
+          h.stash++;
+        }
+      }
+    }
+    // throw: one every ~1.3 s while the HUB counts
+    const active = this.match ? this.match.isActive(al) && !this.match.over : true;
+    if (h.stash > 0 && active && h.t > 1.3) {
+      const b = this.fuel.takeSpare();
+      if (!b) return;
+      h.t = Math.random() * 0.3;
+      h.stash--;
+      h.thrown++;
+      const hub = hubCenter(al);
+      // from over the alliance wall above the OUTPOST, arcing into the HUB
+      const sx = sign * (HALF_L - 0.2), sy = 2.1, sz = o.z;
+      const aimX = hub.x + (Math.random() - 0.5) * 0.5, aimZ = hub.z + (Math.random() - 0.5) * 0.5;
+      const dx = aimX - sx, dz = aimZ - sz;
+      const d = Math.hypot(dx, dz);
+      const dh = HUB.rim + 0.25 - sy;
+      const th = (52 + (Math.random() - 0.5) * 6) * deg;
+      const g = 9.81;
+      const v = Math.sqrt((g * d * d) / (2 * Math.cos(th) ** 2 * (d * Math.tan(th) - dh))) * (1 + (Math.random() - 0.5) * 0.06);
+      const hv = v * Math.cos(th);
+      this.fuel.enable(b, sx, sy, sz, (dx / d) * hv, v * Math.sin(th), (dz / d) * hv);
+      b.shot = null;
+    }
   }
 
   // ------------------------------------------------------------ intake
@@ -197,7 +250,8 @@ export class Game {
     const pop = Math.max(0, this.held - this.capacity) + 3;
     for (let i = 0; i < pop && i < top.length; i++) {
       const a = Math.random() * Math.PI * 2;
-      top[i].body.applyImpulse({ x: Math.cos(a) * 0.25, y: 0.45, z: Math.sin(a) * 0.25 }, true);
+      const lv = top[i].body.linvel();
+      top[i].body.setLinvel({ x: lv.x + Math.cos(a) * 1.16, y: lv.y + 2.1, z: lv.z + Math.sin(a) * 1.16 }, true);
     }
   }
 
@@ -229,6 +283,9 @@ export class Game {
   }
 
   /** Find the FUEL sitting in the hopper (by position, in the robot's frame). */
+  /** How many FUEL start in the robot (the main menu can turn the preload off). */
+  preloadCount() { return this.preloadOn === false ? 0 : this.cfg.preload; }
+
   countInside() {
     const r = this.robot;
     const p = r.body.translation();
@@ -245,7 +302,7 @@ export class Game {
       const t = b.body.translation();
       const dx = t.x - p.x, dz = t.z - p.z;
       if (dx * dx + dz * dz > 1.0) {
-        if (b.inRobot) { b.inRobot = false; b.body.enableCcd(false); }
+        if (b.inRobot) { b.inRobot = false; b.body.enableCcd(false); this.fuel.setHeld(b, false); }
         if (b.feeding) this.setFeeding(b, false);
         continue;
       }
@@ -273,7 +330,7 @@ export class Game {
         }
       }
       const inside = v.x > hb.rearX - 0.08 && v.x < front + 0.02 && Math.abs(v.z) < hb.halfW + 0.03 && v.y > hb.floorY - 0.02 && v.y < hb.netY + 0.15;
-      if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(inside); }
+      if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(inside); this.fuel.setHeld(b, inside); }
       // a fed ball that is well inside (or that missed) shuts the one-way door behind it
       if (b.feeding && (v.x < front - 0.01 || v.x > front + 0.5 || v.y > hb.netY + 0.2)) this.setFeeding(b, false);
       if (inside) { this.inside.push(b); this.insideLocal.push([v.x, v.y, v.z]); }
@@ -438,12 +495,13 @@ export class Game {
     return this.alliance === BLUE ? p.x - reach < -line : p.x + reach > line;
   }
 
-  /** Call a foul on 201: points go to the other alliance (only in a match). */
+  /** Call a foul on 201: points go to the other alliance, as in the game manual. */
   foul(kind, rule, why) {
     const pts = kind === 'MAJOR' ? 15 : 5;
     const opp = this.alliance === BLUE ? RED : BLUE;
-    const live = this.match?.on && !this.match.over;
-    if (live) { this.score[opp] += pts; this.match.points[opp] += pts; this.fouls.push({ kind, rule, why, pts }); }
+    // counts in free drive too, so practice shows what a foul really costs (not after the final buzzer)
+    const live = !this.match?.over;
+    if (live) { this.score[opp] += pts; if (this.match) this.match.points[opp] += pts; this.fouls.push({ kind, rule, why, pts }); }
     this.onFoul?.(`${kind} FOUL ${rule}: ${why}${live ? ` (+${pts} ${opp.toUpperCase()})` : ''}`);
   }
 

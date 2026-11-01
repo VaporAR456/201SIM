@@ -91,6 +91,17 @@ export class Fuel {
     b.jump = true; // teleported: don't draw it sliding from where it was
   }
 
+  /**
+   * FUEL riding in the hopper weighs almost nothing to the physics: the robot's mass already
+   * includes its load, and a full hopper sloshing in a fast spin would otherwise shove the robot
+   * around and make it stutter.
+   */
+  setHeld(b, held) {
+    const c = b.body.collider(0);
+    if (b.baseDensity === undefined) b.baseDensity = c.density();
+    c.setDensity(held ? b.baseDensity * 0.03 : b.baseDensity);
+  }
+
   disable(b) {
     b.active = false;
     b.body.setEnabled(false);

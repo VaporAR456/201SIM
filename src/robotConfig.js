@@ -28,7 +28,7 @@ export const ROBOT_201 = {
   driveRatio: 5.27,
   maxSpeed: 5.45, // m/s
   maxAccel: 9.0, // m/s^2, traction-limited (wheel friction 1.1 x g, minus losses)
-  maxOmega: 2 * Math.PI * 1.6, // rad/s top turn rate
+  maxOmega: 2 * Math.PI * 1.3, // rad/s top turn rate (abdur: 1.6 felt too fast)
   maxAlpha: 30, // rad/s^2 turn acceleration
   // swerve module centers from the robot center (CAD: SDS MK5n), x forward, z right
   modules: [[0.276, 0.283], [0.276, -0.283], [-0.276, 0.283], [-0.276, -0.283]],
