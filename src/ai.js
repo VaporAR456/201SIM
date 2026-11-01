@@ -116,7 +116,7 @@ function saveMemory(m) {
 }
 export function resetAiMemory() { try { localStorage.removeItem(MEM_KEY); } catch { /* nothing */ } }
 function freshMemory() {
-  return { matches: 0, you: { side: 0, cycle: 0, score: 0 }, strat: Object.fromEntries(STRATEGIES.map((s) => [s, { a: 1, b: 1 }])), level: 1 };
+  return { matches: 0, you: { side: 0, cycle: 0, score: 0 }, strat: Object.fromEntries(STRATEGIES.map((s) => [s, { a: 1, b: 1 }])), level: 1.5 };
 }
 // Thompson sampling: draw from each strategy's Beta(wins+1, losses+1) and take the best draw
 function betaSample(a, b) {
@@ -386,6 +386,7 @@ export class AIPlayers {
     }
     if (pool.length < 6) pool = POOLS.all().filter((e) => !ELITE[e.team]);
     this.levelName = level;
+    this.boost = 0; this.adaptT = 0;
     const gaussR = () => { let u = rand() || 1e-6, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
     const used = new Set([201]);
     const draw = () => {
@@ -414,7 +415,8 @@ export class AIPlayers {
         range: TYPES[typeName].range[0] + rand() * (TYPES[typeName].range[1] - TYPES[typeName].range[0]),
         jitter: 0.15 + rand() * 0.25,
       };
-      const lv = levelAt(epaToT(e.epa) + gaussR() * spread);
+      const baseT = epaToT(e.epa) + gaussR() * spread;
+      const lv = levelAt(baseT);
       // the ones whose robots we know: their real shot rate, shooting on the move
       if (elite) { lv.fire = elite.bps / TYPES.Shooter.fire; lv.aim = Math.min(lv.aim, 1.5); }
       const b = new Bot(this.scene, this.RAPIER, this.world, al, e.team, typeName, lv, pers);
@@ -422,6 +424,8 @@ export class AIPlayers {
       b.name = e.name;
       b.epa = e.epa;
       b.onMove = !!elite?.onMove || lv.t > 3.2;
+      b.baseT = baseT;
+      b.elite = !!elite;
       b.sloppy = rand(); // how careful it is about fouls this match
       // TOWER: from how many TOWER points the team really averages
       b.climbLevel = e.tower > 20 ? 3 : e.tower > 9 ? 2 : e.tower > 1.5 ? 1 : 0;
@@ -497,6 +501,29 @@ export class AIPlayers {
     };
   }
 
+  /**
+   * Adaptive, during the match: every few seconds the other alliance's robots get better while
+   * you're ahead and ease off while you're behind, so the match stays close.
+   */
+  adapt(game, match, dt) {
+    if (!match?.on || match.over || match.disabled) return;
+    this.adaptT -= dt;
+    if (this.adaptT > 0) return;
+    this.adaptT = 3;
+    const opp = other(this.alliance);
+    const lead = (game.score[this.alliance] ?? 0) - (game.score[opp] ?? 0);
+    // a lead early in the match counts for more than the same lead near the end
+    const t = Math.max(25, match.t);
+    const want = clamp((lead / t) * 3.2 + lead / 60, -1.2, 2.2);
+    this.boost += (want - this.boost) * 0.45;
+    for (const b of this.bots) {
+      if (b.alliance === this.alliance || b.elite) continue;
+      const lv = levelAt(b.baseT + this.boost);
+      Object.assign(b.level, lv);
+      b.onMove = lv.t > 3.2;
+    }
+  }
+
   /** Watch how you drive, so the AI can play against it. */
   watchYou(robot, game, dt) {
     const p = robot.body.translation();
@@ -525,6 +552,7 @@ export class AIPlayers {
     this.watchYou(robot, game, dt);
     const disabled = match?.disabled;
     for (const al of [BLUE, RED]) this.coachThink(al, ctx, game, dt);
+    if (this.levelName === 'Adaptive') this.adapt(game, match, dt);
     this.referee(robot, game, dt);
     for (const b of this.bots) {
       if (disabled) { b.drive(0, 0, 0, dt); continue; }
@@ -1046,7 +1074,8 @@ export class AIPlayers {
     for (const s of STRATEGIES) { this.mem.strat[s].a = 1 + (this.mem.strat[s].a - 1) * 0.9; this.mem.strat[s].b = 1 + (this.mem.strat[s].b - 1) * 0.9; }
     // Adaptive difficulty: toward close matches
     const margin = yours - theirs;
-    this.mem.level = clamp((this.mem.level ?? 1) + clamp(margin / 60, -0.5, 0.5), 0, 4);
+    // what it took during the match to keep up carries into the next one, plus the result
+    this.mem.level = clamp((this.mem.level ?? 1.5) + this.boost * 0.6 + clamp(margin / 45, -0.8, 0.8), 0, 4);
     const y = this.you;
     const side = y.sideT[1] - y.sideT[0];
     this.mem.you.side = this.mem.you.side * 0.7 + Math.sign(side) * 0.3;
