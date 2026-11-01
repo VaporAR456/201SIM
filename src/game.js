@@ -204,7 +204,7 @@ export class Game {
       // both shooters fire together (one ball each, while there are two to give)
       const ex = this.cfg.shooter.exits || [this.cfg.shooter.exit];
       for (const e of ex) if (this.held > 0) this.launch(this.aim, e);
-      this.fireT = ex.length / (this.settings.bps ?? 9); // a volley of one per shooter
+      this.fireT = ex.length / (this.settings.bpsTotal ?? 8); // a volley of one per shooter
     }
     this.firing = !!(this.aim && this.aim.ready && this.held > 0);
 
