@@ -58,7 +58,15 @@ export class Robot {
     const sideH = (hb.netY + 0.04 - hb.floorY) / 2;
     const sideBack = -L + 2 * t;
     const sideLen = (L - sideBack) / 2;
-    for (const sz of [-1, 1]) solid(RAPIER.ColliderDesc.cuboid(sideLen, sideH, 0.03), sideBack + sideLen, hb.floorY + sideH, sz * (hb.halfW + 0.03), 0.2);
+    // the solid part stops below the robot's height so it still fits under the TRENCH arm;
+    // above that, up to the net, only FUEL feels it
+    const solidTop = cfg.height - 0.01;
+    const sH = (solidTop - hb.floorY) / 2, uH = (hb.netY + 0.04 - solidTop) / 2;
+    for (const sz of [-1, 1]) {
+      solid(RAPIER.ColliderDesc.cuboid(sideLen, sH, 0.03), sideBack + sideLen, hb.floorY + sH, sz * (hb.halfW + 0.03), 0.2);
+      world.createCollider(RAPIER.ColliderDesc.cuboid(sideLen, uH, 0.03).setCollisionGroups(groups(GROUP.INTAKE, GROUP.FUEL))
+        .setTranslation(sideBack + sideLen, solidTop + uH, sz * (hb.halfW + 0.03)).setFriction(0.3).setDensity(0), body);
+    }
     // the net over the fixed part of the hopper (only stops FUEL)
     const fuelOnly = groups(GROUP.INTAKE, GROUP.FUEL);
     this.netColliders = [world.createCollider(
@@ -139,7 +147,8 @@ export class Robot {
     const cfg = this.cfg;
     const g = new THREE.Group();
     const allianceColor = this.alliance === BLUE ? 0x1f6fff : 0xe8322f;
-    const bumperMat = new THREE.MeshStandardMaterial({ color: allianceColor, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
+    // bumper fabric: smooth padded shape with a fine cordura weave
+    const bumperMat = new THREE.MeshStandardMaterial({ color: allianceColor, map: fabricTexture(), roughness: 0.9, side: THREE.DoubleSide });
     this.bumperMat = bumperMat;
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, metalness: 0.5, roughness: 0.5 });
     const accent = new THREE.MeshStandardMaterial({ color: 0xffb000, roughness: 0.5 });
@@ -183,8 +192,8 @@ export class Robot {
     // team numbers
     const num = makeNumberTexture('201');
     const plateMat = new THREE.MeshBasicMaterial({ map: num, transparent: true, depthWrite: false });
-    const ph = h * 0.86;
-    for (const [px, pz, ry, wdt] of [[0, W / 2 + 0.002, 0, 0.44], [0, -W / 2 - 0.002, Math.PI, 0.44], [L / 2 + 0.002, 0, Math.PI / 2, 0.36], [-L / 2 - 0.002, 0, -Math.PI / 2, 0.36]]) {
+    const ph = h * 0.95;
+    for (const [px, pz, ry, wdt] of [[0, W / 2 + 0.002, 0, 0.5], [0, -W / 2 - 0.002, Math.PI, 0.5], [L / 2 + 0.002, 0, Math.PI / 2, 0.42], [-L / 2 - 0.002, 0, -Math.PI / 2, 0.42]]) {
       const p = add(new THREE.PlaneGeometry(wdt, ph), plateMat, px, y, pz);
       p.rotation.y = ry;
       p.castShadow = false;
@@ -359,9 +368,41 @@ export class Robot {
     const eo = dOmega - omega;
     omega += Math.max(-cfg.maxAlpha * dt, Math.min(cfg.maxAlpha * dt, eo));
 
+    // How far the robot is tipped from upright. Real 201 is low and heavy: it tilts over the
+    // BUMPS but doesn't go over, so past a small tilt it is pushed back flat, and if it ever does
+    // end up on its side it is set back on its wheels.
+    const q = this.body.rotation();
+    const ux = 2 * (q.x * q.y - q.w * q.z), uy = 1 - 2 * (q.x * q.x + q.z * q.z), uz = 2 * (q.y * q.z + q.w * q.x);
+    const tilt = Math.acos(Math.max(-1, Math.min(1, uy)));
+    if (tilt > 1.0) {
+      const p = this.body.translation();
+      const h = yaw / 2;
+      this.body.setRotation({ x: 0, y: Math.sin(h), z: 0, w: Math.cos(h) }, true);
+      this.body.setTranslation({ x: p.x, y: Math.max(p.y, 0.05), z: p.z }, true);
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      this.cmd = { vx: 0, vz: 0, omega: 0 };
+      return;
+    }
+    // wheels lose grip as it tips: no driving while it's up on two wheels
+    const grip = Math.max(0, Math.min(1, (uy - 0.8) / 0.15));
+    vx = lv.x + (vx - lv.x) * grip;
+    vz = lv.z + (vz - lv.z) * grip;
+    let ax = av.x * 0.97, az = av.z * 0.97;
+    const over = tilt - 0.3; // ~17 degrees of free tilt for the BUMPS
+    if (over > 0) {
+      // turn about (up x Y) to bring up back to vertical
+      const n = Math.hypot(uz, ux) || 1;
+      const k = 40 * over * dt;
+      ax += (-uz / n) * k;
+      az += (ux / n) * k;
+      // and don't let it keep rotating further over
+      const away = -(ax * -uz + az * ux) / n;
+      if (away > 0) { ax += (-uz / n) * away; az += (ux / n) * away; }
+    }
     this.body.setLinvel({ x: vx, y: lv.y, z: vz }, true);
     // keep whatever pitch/roll the BUMPS give it, with a little damping so it settles
-    this.body.setAngvel({ x: av.x * 0.97, y: omega, z: av.z * 0.97 }, true);
+    this.body.setAngvel({ x: ax, y: omega, z: az }, true);
     this.cmd = { vx, vz, omega };
   }
 
@@ -432,16 +473,35 @@ function wrap(a) {
   return a;
 }
 
+function fabricTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const img = g.createImageData(64, 64);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const v = 225 + ((x + y) % 2) * 14 + (Math.random() - 0.5) * 16;
+    const i = (y * 64 + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(12, 12);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 function makeNumberTexture(text) {
   const c = document.createElement('canvas');
   c.width = 512;
   c.height = 160;
   const g = c.getContext('2d');
   g.fillStyle = '#ffffff';
-  g.font = 'italic 900 150px "Arial Black", Arial, sans-serif';
+  // big block numbers filling the bumper, like the real ones
+  g.font = '900 172px "Arial Black", "Segoe UI Black", Impact, Arial, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(text, 256, 86, 500);
+  g.fillText(text, 256, 88, 470);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

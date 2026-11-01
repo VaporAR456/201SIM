@@ -2,14 +2,16 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { HALF_L, HALF_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS } from './constants.js';
+import { toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { buildAprilTags } from './apriltags.js';
+import { HALF_L, HALF_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups } from './constants.js';
 import { buildField } from './field.js';
 import { buildArena } from './arena.js';
 import { Robot } from './robot.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
 import { ROBOT_201 } from './robotConfig.js';
-import { Fuel, hubCenter } from './fuel.js';
+import { Fuel } from './fuel.js';
 import { Game } from './game.js';
 import { loadSettings, buildSettingsPanel } from './settings.js';
 import { Match, clock } from './match.js';
@@ -123,8 +125,15 @@ async function init() {
   world.integrationParameters.numSolverIterations = 8;
   buildArena(scene);
   const fieldGroup = buildField(scene, RAPIER, world);
+  // The field's own colliders: give them a group of their own, so the hopper's FUEL-only
+  // parts (net, gate, upper side plates) pass through walls and the TRENCH arm
+  world.forEachCollider((c) => { if ((c.collisionGroups() >>> 0) === 0xffffffff) c.setCollisionGroups(groups(GROUP.FIELD)); });
   // the official field CAD replaces the simple field drawing (the simple colliders stay)
-  loadFieldCad(scene).then((ok) => { if (ok) fieldGroup.visible = false; });
+  loadFieldCad(scene).then((ok) => {
+    if (!ok) return;
+    // the CAD draws everything except the carpet, which stays a flat textured plane
+    for (const c of fieldGroup.children) c.visible = c.userData.carpet === true;
+  });
 
   const robot = new Robot(scene, RAPIER, world, ROBOT_201, settings.alliance);
   loadCad(robot);
@@ -315,7 +324,7 @@ async function init() {
       const p0 = performance.now();
       while (acc >= STEP) {
         // in third person, "forward" on the stick is the way the camera looks
-        robot.driveRef = camIndex === THIRD ? camYaw + (camFlip ? 0 : Math.PI) : null;
+        robot.driveRef = camIndex === THIRD ? camYaw + (camFlip ? Math.PI : 0) : null;
         // the pause between AUTO and TELEOP (and after the buzzer): robot disabled
         const inp = match.disabled ? IDLE : input;
         const aimTurn = game.update(inp, STEP, settings.alliance);
@@ -450,9 +459,7 @@ async function init() {
   }
 
   let camYaw = 0;
-  let camFlip = false; // false: third-person camera on the intake side
-  const hubs = [hubCenter(BLUE), hubCenter(RED)];
-  const inHub = (x, z) => hubs.some((h) => Math.abs(x - h.x) < 1.0 && Math.abs(z - h.z) < 1.0);
+  let camFlip = false; // false: third-person camera behind the robot (shooter side), true: intake side
   function updateCamera(dt) {
     if (camera.userData.freeze) return; // debugging: hold a hand-placed camera
     const p = tmp.copy(robot.root.position); // the drawn (blended) pose, so the camera never jitters against the model
@@ -467,30 +474,21 @@ async function init() {
       camLook.set(p.x, 0.3, p.z);
       camLook.lerp(tmp2.set(0, 0, ds.z * 0.5), 0.35);
     } else if (mode === 1) {
-      // third person: behind the robot, swinging round smoothly as it turns
+      // third person (the original follow camera): behind the robot, swinging round smoothly
+      // as it turns. Flip (T / D-pad right) moves it to the other side of the robot.
       let d = robot.yaw() - camYaw;
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
-      camYaw += d * (1 - Math.exp(-dt * 14)); // keeps up with a full-speed spin
-      // default: out past the intake, looking back over the robot toward the shooter (which fires
-      // out the back), so a HUB shot never puts the camera inside the HUB. Flip for the other side.
-      const dir = camFlip ? -1 : 1; // +1: camera on the intake side
+      camYaw += d * (1 - Math.exp(-dt * 2.5));
+      const dir = camFlip ? 1 : -1; // -1: behind the robot's back
       const cx = Math.cos(camYaw) * dir, cz = -Math.sin(camYaw) * dir;
-      let dist = 2.3;
-      // keep the camera out of the HUBs and off the walls: pull it in until the spot is clear
-      for (; dist > 0.8; dist -= 0.1) {
-        const x = p.x + cx * dist, z = p.z + cz * dist;
-        if (Math.abs(x) > HALF_L - 0.1 || Math.abs(z) > HALF_W - 0.1) continue;
-        if (inHub(x, z)) continue;
-        break;
-      }
-      camPos.set(p.x + cx * dist, 1.35, p.z + cz * dist);
-      camLook.set(p.x - cx * 1.6, 0.35, p.z - cz * 1.6);
+      camPos.set(p.x + cx * 3.4, 2.0, p.z + cz * 3.4);
+      camLook.set(p.x - cx * 2.0, 0.4, p.z - cz * 2.0);
     } else {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
     }
-    const k = 1 - Math.exp(-dt * (mode === 0 ? 6 : mode === 1 ? 18 : 8));
+    const k = 1 - Math.exp(-dt * (mode === 0 ? 6 : 8));
     camera.position.lerp(camPos, k);
     if (!camera.userData.look) camera.userData.look = camLook.clone();
     camera.userData.look.lerp(camLook, k);
@@ -498,7 +496,7 @@ async function init() {
   }
 
   requestAnimationFrame(frame);
-  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup }; // handy for debugging in the console
+  window.__sim = { robot, world, input, settings, game, fuel, player, renderer, scene, camera, sun, fieldGroup, THREE }; // handy for debugging in the console
 }
 
 /** Load the converted official field CAD, if it was built. Returns true when it's in the scene. */
@@ -510,18 +508,23 @@ async function loadFieldCad(scene) {
     const loader = new GLTFLoader();
     loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await loader.loadAsync(url);
-    const solid = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.1, roughness: 0.8 });
+    const solid = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.15, roughness: 0.65 });
+    gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((o) => {
       if (!o.isMesh) return;
+      if (o.material?.name === 'field_carpet') { o.visible = false; return; }
       if (o.material?.name === 'field_clear') {
         o.material = new THREE.MeshStandardMaterial({ color: 0xcfe0f2, transparent: true, opacity: 0.16, roughness: 0.1, side: THREE.DoubleSide, depthWrite: false });
       } else {
+        // smooth round parts, keep box edges crisp (flat shading looked faceted)
+        o.geometry = toCreasedNormals(o.geometry, Math.PI / 5);
         o.material = solid;
         o.receiveShadow = true;
         o.castShadow = true;
       }
     });
     scene.add(gltf.scene);
+    buildAprilTags(scene);
     return true;
   } catch (e) {
     console.warn('field CAD not loaded', e);

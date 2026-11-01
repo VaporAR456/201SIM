@@ -250,16 +250,27 @@ export class Game {
         continue;
       }
       v.set(dx, t.y - p.y, dz).applyQuaternion(this._qi);
-      // Containment: a held ball squeezed partway through a side plate (a stiff solver limit
-      // when 30+ FUEL lean on it in a fast spin) goes back in, the way the real plate would hold it
-      if (b.inRobot && !this.netBroken && Math.abs(v.z) > hb.halfW - FUEL_RADIUS * 0.5 && Math.abs(v.z) < hb.halfW + 0.2
-          && v.x > hb.rearX && v.x < front && v.y < hb.netY) {
-        const lz = Math.sign(v.z) * (hb.halfW - FUEL_RADIUS - 0.005);
-        const back = v.clone().setZ(lz).applyQuaternion(this._qf.set(q.x, q.y, q.z, q.w));
-        b.body.setTranslation({ x: p.x + back.x, y: p.y + back.y, z: p.z + back.z }, true);
-        const lv = r.body.linvel();
-        b.body.setLinvel({ x: lv.x, y: lv.y, z: lv.z }, true);
-        v.z = lz;
+      // Containment: a held ball squeezed partway through a wall (a stiff solver limit when 30+
+      // FUEL lean on it in a fast spin, or a hard landing off a BUMP) goes back in, the way the
+      // real hopper would hold it. Only the intake (feeding) and a torn net let FUEL out.
+      if (b.inRobot && !b.feeding && !this.netBroken) {
+        const R = FUEL_RADIUS + 0.005;
+        const lo = [hb.rearX + R, hb.floorY + R, -hb.halfW + R], hi = [front - R, hb.netY - R, hb.halfW - R];
+        const c = [v.x, v.y, v.z];
+        let out = false, far = false;
+        for (let k = 0; k < 3; k++) {
+          if (c[k] < lo[k]) { far ||= lo[k] - c[k] > 0.25; c[k] = lo[k]; out = true; }
+          else if (c[k] > hi[k]) { far ||= c[k] - hi[k] > 0.25; c[k] = hi[k]; out = true; }
+        }
+        // only a little way out: it's still really in there
+        if (out && !far && (c[0] - v.x) ** 2 + (c[1] - v.y) ** 2 + (c[2] - v.z) ** 2 > (0.6 * FUEL_RADIUS) ** 2) {
+          v.set(c[0], c[1], c[2]);
+          const back = this._v2 || (this._v2 = new THREE.Vector3());
+          back.copy(v).applyQuaternion(this._qf.set(q.x, q.y, q.z, q.w));
+          b.body.setTranslation({ x: p.x + back.x, y: p.y + back.y, z: p.z + back.z }, true);
+          const lv = r.body.linvel();
+          b.body.setLinvel({ x: lv.x, y: lv.y, z: lv.z }, true);
+        }
       }
       const inside = v.x > hb.rearX - 0.08 && v.x < front + 0.02 && Math.abs(v.z) < hb.halfW + 0.03 && v.y > hb.floorY - 0.02 && v.y < hb.netY + 0.15;
       if (inside !== !!b.inRobot) { b.inRobot = inside; b.body.enableCcd(inside); }

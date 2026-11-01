@@ -90,6 +90,7 @@ export const COLORS = {
 
 // Rapier collision groups: (membership << 16) | filter
 export const GROUP = {
+  FIELD: 0x0001, // walls, HUBS, TRENCH arms, TOWERS...
   TERRAIN: 0x0002, // BUMPS
   INTAKE: 0x0004,
   FUEL: 0x0008,

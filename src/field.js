@@ -5,12 +5,33 @@ import {
   WALL, HUB, BUMP, TRENCH, TOWER, DEPOT, OUTPOST, COLORS, GROUP, groups,
 } from './constants.js';
 
+/** Field carpet: dark gray with a fine fleck, like the real stuff (drawn once, tiled). */
+function carpetTexture(rx, ry) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const x = c.getContext('2d');
+  x.fillStyle = '#5a5d62';
+  x.fillRect(0, 0, 256, 256);
+  const img = x.getImageData(0, 0, 256, 256);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const n = (Math.random() - 0.5) * 34 + (Math.random() < 0.04 ? 30 : 0);
+    img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n + 2;
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  t.repeat.set(rx, ry);
+  return t;
+}
+
 export function buildField(scene, RAPIER, world) {
   const group = new THREE.Group();
   scene.add(group);
 
   const mat = {
-    carpet: new THREE.MeshStandardMaterial({ color: COLORS.carpet, roughness: 0.95 }),
+    carpet: new THREE.MeshStandardMaterial({ map: carpetTexture((FIELD_L + 0.6) / 1.2, (FIELD_W + 0.6) / 1.2), roughness: 1 }),
     tape: new THREE.MeshBasicMaterial({ color: COLORS.tape }),
     steel: new THREE.MeshStandardMaterial({ color: COLORS.steel, metalness: 0.6, roughness: 0.4 }),
     poly: new THREE.MeshStandardMaterial({ color: COLORS.poly, transparent: true, opacity: 0.18, roughness: 0.1 }),
@@ -43,9 +64,11 @@ export function buildField(scene, RAPIER, world) {
 
   // ------------------------------------------------------------ carpet (the gym is in arena.js)
 
-  const carpet = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_L, FIELD_W), mat.carpet);
+  const carpet = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_L + 2 * 0.3, FIELD_W + 2 * 0.3), mat.carpet);
   carpet.rotation.x = -Math.PI / 2;
+  carpet.position.y = 0.0005;
   carpet.receiveShadow = true;
+  carpet.userData.carpet = true;
   group.add(carpet);
   collider(RAPIER.ColliderDesc.cuboid(HALF_L + 2, 0.5, HALF_W + 2), 0, -0.5, 0);
 

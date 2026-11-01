@@ -65,7 +65,7 @@ scene.traverse((n) => {
   const b = getBounds(n);
   const size = Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]);
   if (size < 0.04) { n.setMesh(null); dropped++; return; }
-  n.setExtras({ ...n.getExtras(), glass: glass.test(parent), carpet: /carpet/i.test(name) });
+  n.setExtras({ ...n.getExtras(), glass: glass.test(parent), carpet: /Playing Field Carpet/i.test(name), tape: /Gaff(er)? Tape/i.test(name) });
   if (glass.test(parent)) clear++;
   n.setName(''); m.setName('');
 });
@@ -78,6 +78,7 @@ top.setRotation([0, 1, 0, 0]);
 await doc.transform(prune(), dedup(), flatten());
 for (const m of root.listMeshes()) for (const p of m.listPrimitives()) for (const sem of p.listSemantics()) if (sem !== 'POSITION') p.setAttribute(sem, null);
 const solid = doc.createMaterial('field').setMetallicFactor(0.1).setRoughnessFactor(0.8);
+const carpetMat = doc.createMaterial('field_carpet').setMetallicFactor(0).setRoughnessFactor(1);
 const clearMat = doc.createMaterial('field_clear').setMetallicFactor(0).setRoughnessFactor(0.1).setBaseColorFactor([0.8, 0.88, 0.95, 0.18]).setAlphaMode('BLEND').setDoubleSided(true);
 // group meshes: glass vs solid, and by area so frustum culling still helps
 const groups = {};
@@ -99,8 +100,13 @@ for (const n of scene.listChildren()) {
   }
   seenMesh.add(m);
   const isGlass = !!n.getExtras().glass;
+  const isCarpet = !!n.getExtras().carpet;
+  // tape lies exactly on the carpet; lift it a hair so it doesn't flicker
+  if (n.getExtras().tape) { const t = n.getTranslation(); n.setTranslation([t[0], t[1] + 0.0015, t[2]]); }
   for (const p of m.listPrimitives()) {
     if (isGlass) { p.setMaterial(clearMat); continue; }
+    // the carpet gets its own textured material in the sim
+    if (isCarpet) { p.setMaterial(carpetMat); continue; }
     // the CAD carpet is plain white; real field carpet is mid gray
     const ex = n.getExtras();
     let c = ex.carpet ? [0.42, 0.43, 0.45, 1] : ex.paint ?? p.getMaterial()?.getBaseColorFactor() ?? [0.6, 0.6, 0.6, 1];
@@ -114,7 +120,7 @@ for (const n of scene.listChildren()) {
   }
   const b = getBounds(n);
   const cx = (b.min[0] + b.max[0]) / 2;
-  const key = (isGlass ? 'clear_' : 'solid_') + (cx < -4 ? 'a' : cx > 4 ? 'c' : 'b');
+  const key = isCarpet ? 'carpet' : (isGlass ? 'clear_' : 'solid_') + (cx < -4 ? 'a' : cx > 4 ? 'c' : 'b');
   const g = groups[key] ??= (() => { const x = doc.createNode(key); scene.addChild(x); return x; })();
   g.addChild(n);
 }
@@ -136,7 +142,16 @@ for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
   for (let i = 0; i < ia.length; i++) ni[i] = remap[ia[i]];
   pos.setArray(new Float32Array(out)); idx.setArray(ni);
 }
-await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: 0.0, error: Number(process.env.ERR || 0.02), lockBorder: false }));
+// simplify with an absolute error in meters: a relative error collapses thin parts on long meshes
+// (the TRENCH arms vanished that way)
+const ERR = Number(process.env.ERR || 0.004);
+for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
+  const idx = p.getIndices(); if (!idx || p.getMaterial() === carpetMat) continue; // the 5mm carpet would collapse below the floor
+  const pos = p.getAttribute('POSITION');
+  const [out] = MeshoptSimplifier.simplify(Uint32Array.from(idx.getArray()), pos.getArray(), 3, 0, ERR, ['ErrorAbsolute']);
+  idx.setArray(out);
+}
+await doc.transform(prune());
 count('simplified');
 await doc.transform(join({ keepNamed: true }), prune(), dedup(), quantize({ quantizePosition: 16 }), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
 count('final');
