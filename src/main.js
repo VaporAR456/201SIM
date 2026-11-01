@@ -174,6 +174,7 @@ async function init() {
     robot.fieldForward = settings.alliance === BLUE ? 0 : Math.PI;
     robot.bumperMat.color.set(settings.alliance === BLUE ? 0x1f6fff : 0xe8322f);
     game.preloadOn = settings.preload;
+    humans?.setAlliance(settings.alliance);
     game.reset();
     match.reset(settings.mode === 'match');
     ui.results.hidden = true;
@@ -182,6 +183,7 @@ async function init() {
     clearToast?.();
   };
   let clearToast = null;
+  let humans = null;
   restart();
 
   const modeBtns = document.querySelectorAll('[data-mode]');
@@ -289,7 +291,8 @@ async function init() {
   addEventListener('pointerdown', () => sound.unlock());
   addEventListener('keydown', () => sound.unlock());
   game.onShot = () => sound.shot();
-  const humans = new Humans(scene);
+  humans = new Humans(scene);
+  humans.setAlliance(settings.alliance);
   game.onHumanThrow = (al) => humans.throwBall(al);
   let lastPhase = null;
   let lastCountdown = 0;

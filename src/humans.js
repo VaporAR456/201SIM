@@ -28,6 +28,24 @@ function person(shirt) {
   return g;
 }
 
+function nametag(text) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 72;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(15,18,22,0.82)';
+  x.beginPath(); x.roundRect(4, 4, 248, 64, 14); x.fill();
+  x.fillStyle = '#fff';
+  x.font = '800 40px system-ui, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text, 128, 38);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  s.scale.set(0.95, 0.27, 1);
+  s.renderOrder = 10;
+  return s;
+}
+
 export class Humans {
   constructor(scene) {
     this.people = {};
@@ -39,11 +57,18 @@ export class Humans {
       // face the field (+X for blue)
       p.rotation.y = al === BLUE ? 0 : Math.PI;
       scene.add(p);
+      const tag = nametag('ISSAC');
+      tag.position.set(0, 2.1, 0);
+      p.add(tag);
+      p.userData.tag = tag;
       this.people[al] = { g: p, t: 99, idle: Math.random() * 6 };
     }
   }
 
   throwBall(al) { this.people[al].t = 0; }
+
+  /** Only your alliance's human player (201's) wears the ISSAC tag. */
+  setAlliance(al) { for (const [k, h] of Object.entries(this.people)) h.g.userData.tag.visible = k === al; }
 
   update(dt) {
     for (const h of Object.values(this.people)) {
