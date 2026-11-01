@@ -394,7 +394,7 @@ async function init() {
         lastPhase = ph;
         lastCountdown = match.countdown;
       } else { lastPhase = null; lastCountdown = 0; }
-      if (match.disabled && !match.over && !wasDisabled) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
+      if (match.disabled && !match.over && !wasDisabled && match.countdown === 0) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
       if (match.over && !ui.results.hidden) {
         if (input.pressed('confirm')) keepDriving();
         else if (input.pressed('special1')) start();

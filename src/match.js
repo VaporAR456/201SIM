@@ -32,13 +32,13 @@ export class Match {
     this.lastActive = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;
     this.overT = 0;
-    // 3-2-1-GO before the clock starts: drive around and get your bearings (no scoring yet)
+    // 3-2-1-GO before the clock starts: robots are disabled until GO
     this.countdown = on ? 3 : 0;
   }
 
   /** True while the robot is disabled (the pause between AUTO and TELEOP, or after the match). */
   get disabled() {
-    return this.on && (this.over || !!this.phase().disabled);
+    return this.on && (this.over || this.countdown > 0 || !!this.phase().disabled);
   }
 
   /** Seconds left in TELEOP (2:20 at the start of the TRANSITION SHIFT). */
