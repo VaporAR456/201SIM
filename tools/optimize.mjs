@@ -9,7 +9,7 @@ const scene = root.listScenes()[0];
 const robot = scene.listChildren()[0];
 
 // 1. drop hardware that is invisible at sim scale
-const junk = /^Bumper|rivet|screw|nut\b|locknut|washer|SHCS|BHCS|ziptie|spacer|collar|bearing|end screw|origin cube|powerpole|tube plug/i;
+const junk = /rivet|screw|nut\b|locknut|washer|SHCS|BHCS|ziptie|spacer|collar|bearing|end screw|origin cube|powerpole|tube plug/i;
 let dropped = 0;
 robot.traverse(n => { if (n.getMesh() && junk.test(n.getName())) { n.setMesh(null); dropped++; } });
 
@@ -21,6 +21,7 @@ for (const sub of robot.listChildren()) {
   sub.traverse(n => {
     if (!n.getMesh()) return;
     if (/SDS MK5 Molded Wheel/.test(n.getName())) { n.setName(`wheel_${wheel}`); n.getMesh().setName(`wheel_${wheel++}`); }
+    else if (/^Bumper/.test(n.getName())) { n.setName('bumper_mesh'); n.getMesh().setName('bumper_mesh'); n.setExtras({ part: 'bumper' }); return; }
     else { n.setName(''); n.getMesh().setName(''); }
     n.setExtras({ part: tag });
   });
@@ -44,7 +45,10 @@ for (const n of scene.listChildren()) {
 for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { for (const sem of p.listSemantics()) if (sem !== 'POSITION' && sem !== 'COLOR_0') p.setAttribute(sem, null); }
 // one shared material + per-vertex color: lets join() merge each group into a single draw call
 const shared = doc.createMaterial('cad').setMetallicFactor(0.25).setRoughnessFactor(0.6);
+const bumperMat = doc.createMaterial('bumper').setBaseColorFactor([0.1, 0.3, 0.9, 1]);
 for (const m of root.listMeshes()) for (const p of m.listPrimitives()) {
+  // the bumpers keep their own material so the sim can paint them the alliance color
+  if (m.getName() === 'bumper_mesh') { p.setMaterial(bumperMat); continue; }
   const c = p.getMaterial()?.getBaseColorFactor() ?? [0.6, 0.6, 0.6, 1];
   const n = p.getAttribute('POSITION').getCount();
   const col = new Float32Array(n * 3);

@@ -47,19 +47,32 @@ export class Game {
         this.slots.push([hb.x[0] + sp / 2 + i * sp + off * 0.5, hb.y0 + FUEL_RADIUS + layer * sp * 0.82, hb.z[0] + sp / 2 + k * sp + off * 0.5]);
       }
     }
+    this.slotNow = [];
     this.heldMesh = new THREE.InstancedMesh(fuel.mesh.geometry, fuel.mesh.material, this.slots.length);
     this.heldMesh.castShadow = true;
     this.heldMesh.count = 0;
     robot.root.add(this.heldMesh);
     this.heldMatrix = new THREE.Matrix4();
 
-    const net = new THREE.GridHelper(1, 10, 0x111111, 0x111111);
-    net.scale.set(hb.x[1] - hb.x[0], 1, hb.z[1] - hb.z[0]);
-    net.position.set((hb.x[0] + hb.x[1]) / 2, hb.netY, (hb.z[0] + hb.z[1]) / 2);
-    net.material.transparent = true;
-    net.material.opacity = 0.7;
+    // the net: a grid of cords that sags, bulges over a full hopper and wobbles as the robot moves
+    const NU = 14, NV = 10;
+    this.netN = [NU, NV];
+    const netGeo = new THREE.BufferGeometry();
+    netGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NU * NV * 3), 3));
+    const idx = [];
+    for (let i = 0; i < NU; i++) for (let k = 0; k < NV; k++) {
+      const n = i * NV + k;
+      if (i + 1 < NU) idx.push(n, n + NV);
+      if (k + 1 < NV) idx.push(n, n + 1);
+    }
+    netGeo.setIndex(idx);
+    const net = new THREE.LineSegments(netGeo, new THREE.LineBasicMaterial({ color: 0x15171a }));
+    net.frustumCulled = false;
     robot.root.add(net);
     this.netMesh = net;
+    this.wob = { y: 0, vy: 0, z: 0, vz: 0, x: 0, vx: 0 };
+    this.lastVel = null;
+    this.lastT = 0;
   }
 
   /** How many FUEL fit right now: the net holds `capacity`; a broken net loses a quarter. */
@@ -71,7 +84,7 @@ export class Game {
     this.netBroken = false;
     this.strain = 0;
     this.spillT = 0;
-    if (this.netMesh) { this.netMesh.rotation.set(0, 0, 0); this.netMesh.position.y = this.cfg.hopperBox.netY; }
+    if (this.wob) Object.assign(this.wob, { y: 0, vy: 0, z: 0, vz: 0, x: 0, vx: 0 });
     this.score = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;
     this.missedInactive = 0;
@@ -160,9 +173,8 @@ export class Game {
   breakNet() {
     this.netBroken = true;
     this.strain = 0;
-    // the net flops over the side and the overfill falls out
-    this.netMesh.rotation.z = 1.2;
-    this.netMesh.position.y -= 0.15;
+    // the net tears off the front and flops over the back; the overfill falls out
+    this.wob.vy += 2;
     this.spill(Math.max(0, this.held - this.capacity) + 3);
   }
 
@@ -338,14 +350,96 @@ export class Game {
   drawHeld(time) {
     const n = Math.min(this.held, this.slots.length);
     const shake = this.agitateT > 0 ? 0.012 : 0;
+    // the hopper is shorter when slid in: squeeze the pile toward the shooter and stack it higher
+    const x0 = this.cfg.hopperBox.x[0];
+    const slide = this.robot.intakeNode ? this.robot.intakeNode.position.x - this.robot.intakeBase : 0;
+    const f = Math.max(0.62, 1 + slide / (this.cfg.hopperBox.x[1] - x0));
+    const lift = (1 - f) * 0.06;
     for (let i = 0; i < n; i++) {
-      const [x, y, z] = this.slots[i];
+      const [sx, sy, z] = this.slots[i];
+      const x = x0 + (sx - x0) * f;
+      const y = sy + lift * ((sy - this.cfg.hopperBox.y0) / 0.13);
+      this.slotNow[i] = [x, y, z];
       const j = shake ? Math.sin(time * 23 + i * 1.7) * shake : 0;
       this.heldMatrix.makeTranslation(x + j, y + Math.abs(j), z - j);
       this.heldMesh.setMatrixAt(i, this.heldMatrix);
     }
     this.heldMesh.count = n;
     this.heldMesh.instanceMatrix.needsUpdate = true;
+    this.drawNet(time, n);
+  }
+
+  /** Lay the net over the hopper: tied at its edges, sagging when slack, pushed up by FUEL, wobbling. */
+  drawNet(time, n) {
+    const dt = Math.min(0.05, Math.max(0, time - this.lastT));
+    this.lastT = time;
+    const R = this.cfg.netRig;
+    const [NU, NV] = this.netN;
+    const pos = this.netMesh.geometry.attributes.position;
+
+    // shake from the robot's acceleration (in its own frame), plus the agitator
+    const v = this.robot.body.linvel();
+    const yaw = this.robot.yaw();
+    let ax = 0, ay = 0, az = 0;
+    if (this.lastVel && dt > 0) {
+      const dx = (v.x - this.lastVel.x) / dt, dz = (v.z - this.lastVel.z) / dt;
+      ay = (v.y - this.lastVel.y) / dt;
+      ax = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      az = dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    }
+    this.lastVel = { x: v.x, y: v.y, z: v.z };
+    const w = this.wob;
+    const spring = (key, vkey, drive, k, c) => {
+      w[vkey] += (-k * w[key] - c * w[vkey] - drive) * dt;
+      w[key] += w[vkey] * dt;
+      w[key] = Math.max(-0.12, Math.min(0.12, w[key]));
+    };
+    const agit = this.agitateT > 0 ? Math.sin(time * 20) * 6 : 0;
+    spring('y', 'vy', ay * 0.6 + agit, 160, 7);
+    spring('x', 'vx', ax * 0.25, 90, 5);
+    spring('z', 'vz', az * 0.25, 90, 5);
+
+    // how far the front tie point has slid with the hopper
+    const front = R.frontX + (this.robot.intakeNode ? this.robot.intakeNode.position.x - this.robot.intakeBase : 0);
+    const len = front - R.rearX;
+    const slack = Math.max(0, 1 - len / (R.frontX - R.rearX));
+    const sag = 0.035 + slack * 0.16;
+    const r = FUEL_RADIUS;
+    const held = this.slotNow;
+    for (let i = 0; i < NU; i++) {
+      const u = i / (NU - 1);
+      for (let k = 0; k < NV; k++) {
+        const vv = k / (NV - 1);
+        const bell = Math.sin(Math.PI * u) * Math.sin(Math.PI * vv);
+        let x, y, z;
+        if (this.netBroken) {
+          // torn off the front: hanging from the shooter tower, down over the back of the robot
+          const s = u * (R.frontX - R.rearX);
+          const over = R.rearX + 0.37;
+          z = (vv - 0.5) * 2 * R.sideZ * 0.9 + w.z * u * 2;
+          if (s < over - R.rearX + 0.02) { x = R.rearX - s; y = R.rearY + 0.01 - s * 0.05; }
+          else { x = -over - 0.01 + w.x * u; y = R.rearY - (s - (over - R.rearX + 0.02)) + 0.02; }
+          y += w.y * bell;
+        } else {
+          x = R.rearX + u * len + w.x * bell * 0.6;
+          z = (vv - 0.5) * 2 * R.sideZ + w.z * bell * 0.6;
+          const edge = R.rearY + (R.frontY - R.rearY) * u;
+          const side = R.sideY;
+          // edges sit on their tie points; the middle sags, more when the hopper is pulled in
+          const tie = edge * (1 - Math.abs(vv - 0.5) * 2 * 0.3) + side * Math.abs(vv - 0.5) * 2 * 0.3;
+          y = tie - sag * bell + w.y * bell;
+          // FUEL piled high pushes the net up
+          for (let j = 0; j < n; j++) {
+            const b = held[j];
+            const dx = b[0] - x, dz = b[2] - z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < r * r * 1.4) y = Math.max(y, b[1] + Math.sqrt(Math.max(0, r * r * 1.4 - d2)) * 0.85);
+          }
+        }
+        pos.setXYZ(i * NV + k, x, y, z);
+      }
+    }
+    pos.needsUpdate = true;
   }
 
   // ------------------------------------------------------------ aim line

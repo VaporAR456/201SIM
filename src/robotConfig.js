@@ -11,11 +11,11 @@ export const ROBOT_201 = {
   name: 'FRC 201',
 
   // Size
-  frameLength: 27 * IN, // frame, front to back, without bumpers (CAD)
-  frameWidth: 28.125 * IN, // frame side to side, without bumpers (CAD)
+  frameLength: 26.5 * IN, // frame, front to back, without bumpers (CAD bumpers are 33 in long outside)
+  frameWidth: 27.5 * IN, // frame side to side, without bumpers (CAD bumpers are 34 in wide outside)
   bumperThickness: 3.25 * IN,
   bumperHeight: 5 * IN, // bumper zone thickness
-  bumperBottom: 2 * IN, // gap between carpet and bottom of bumpers
+  bumperBottom: 1.75 * IN, // gap between carpet and bottom of bumpers (CAD)
   height: 0.559, // tallest point (top of the shooter in CAD, 22.0in); under 22.25in fits the TRENCH
   // deployed intake reaches this far past the front bumper (CAD: 8.1in)
   intakeReach: 0.207,
@@ -57,7 +57,11 @@ export const ROBOT_201 = {
   },
 
   // Where held FUEL sits (robot frame, meters), and the net stretched over the top of it
-  hopperBox: { x: [-0.3, 0.3], z: [-0.3, 0.3], y0: 0.1, netY: 0.6 },
+  // where held FUEL is drawn (the open hopper between the side plates, in front of the shooter tower)
+  hopperBox: { x: [-0.03, 0.53], z: [-0.32, 0.32], y0: 0.12 }, // x: with the hopper slid all the way out
+  // the net is tied to the top of the shooter tower at the back, the side plates, and the top of
+  // the intake at the front, so it stretches and goes slack as the hopper slides in and out
+  netRig: { rearX: -0.05, rearY: 0.53, frontX: 0.6, frontY: 0.47, sideZ: 0.36, sideY: 0.45 },
   // The net: when the hopper is full, ramming more FUEL into the intake crams one extra in every
   // cramEvery seconds (up to cramExtra); keep forcing it for breakAfter seconds and it tears.
   net: { cramExtra: 3, cramEvery: 1.5, breakAfter: 5, recover: 0.5 },

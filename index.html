@@ -32,6 +32,7 @@
       <button id="open-controls">Controls <kbd>Y</kbd></button>
       <button id="open-settings">Settings</button>
       <p id="pad-status"></p>
+      <p id="gpu-info"></p>
     </section>
 
     <section id="controls" class="panel wide" hidden>
@@ -47,20 +48,28 @@
     <section id="pause" class="panel" hidden>
       <h2>Paused</h2>
       <button id="resume" class="primary">Resume <kbd>Menu</kbd> / <kbd>Esc</kbd></button>
+      <div class="row"><span class="label">Camera</span><span id="pause-cams" class="row cams"></span></div>
       <button id="pause-controls">Controls <kbd>Y</kbd></button>
       <button id="pause-settings">Settings</button>
       <button id="to-menu">Main menu</button>
     </section>
 
     <div id="scorebar" hidden>
-      <div class="sb-team blue"><div class="sb-name">BLUE</div><div class="sb-teams" id="sb-teams-blue"></div><div class="sb-hub" id="sb-hub-blue"></div></div>
+      <div class="sb-team blue">
+        <div class="sb-name">BLUE</div>
+        <div class="sb-teams" id="sb-teams-blue"><span><i></i><b>----</b></span><span><i></i><b>----</b></span><span><i></i><b>----</b></span></div>
+      </div>
       <div class="sb-score blue" id="score-blue">0</div>
       <div class="sb-mid">
         <div class="sb-clock" id="sb-clock">2:40</div>
         <div class="sb-sub"><span id="sb-phase">AUTO</span><span id="sb-left">:20</span></div>
       </div>
       <div class="sb-score red" id="score-red">0</div>
-      <div class="sb-team red"><div class="sb-name">RED</div><div class="sb-teams" id="sb-teams-red"></div><div class="sb-hub" id="sb-hub-red"></div></div>
+      <div class="sb-team red">
+        <div class="sb-name">RED</div>
+        <div class="sb-teams" id="sb-teams-red"><span><i></i><b>----</b></span><span><i></i><b>----</b></span><span><i></i><b>----</b></span></div>
+      </div>
+      <div class="sb-hub blue" id="sb-hub-blue"></div><div class="sb-hub red" id="sb-hub-red"></div>
     </div>
 
     <section id="results" hidden>

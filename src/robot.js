@@ -96,7 +96,7 @@ export class Robot {
     const cfg = this.cfg;
     const g = new THREE.Group();
     const allianceColor = this.alliance === BLUE ? 0x1f6fff : 0xe8322f;
-    const bumperMat = new THREE.MeshStandardMaterial({ color: allianceColor, roughness: 0.7 });
+    const bumperMat = new THREE.MeshStandardMaterial({ color: allianceColor, roughness: 0.85, flatShading: true, side: THREE.DoubleSide });
     this.bumperMat = bumperMat;
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, metalness: 0.5, roughness: 0.5 });
     const accent = new THREE.MeshStandardMaterial({ color: 0xffb000, roughness: 0.5 });
@@ -117,17 +117,34 @@ export class Robot {
       target.add(m);
       return m;
     };
-    // bumpers (with rounded-looking fabric color) and number plates: shown with or without the CAD
-    add(new THREE.BoxGeometry(L, h, t), bumperMat, 0, y, W / 2 - t / 2);
-    add(new THREE.BoxGeometry(L, h, t), bumperMat, 0, y, -W / 2 + t / 2);
-    add(new THREE.BoxGeometry(t, h, W - 2 * t), bumperMat, L / 2 - t / 2, y, 0);
-    add(new THREE.BoxGeometry(t, h, W - 2 * t), bumperMat, -L / 2 + t / 2, y, 0);
-    // team number plates
+    // Bumpers: a padded ring at the CAD bumper size and height, rounded at the corners like the
+    // real fabric covers, with big white 201s on every side
+    const ring = new THREE.Shape();
+    const rr = 0.05;
+    const rect = (path, hx, hz, rad) => {
+      path.moveTo(-hx + rad, -hz);
+      path.lineTo(hx - rad, -hz); path.quadraticCurveTo(hx, -hz, hx, -hz + rad);
+      path.lineTo(hx, hz - rad); path.quadraticCurveTo(hx, hz, hx - rad, hz);
+      path.lineTo(-hx + rad, hz); path.quadraticCurveTo(-hx, hz, -hx, hz - rad);
+      path.lineTo(-hx, -hz + rad); path.quadraticCurveTo(-hx, -hz, -hx + rad, -hz);
+    };
+    const bev = 0.018;
+    rect(ring, L / 2 - bev, W / 2 - bev, rr);
+    const hole = new THREE.Path();
+    rect(hole, L / 2 - t + bev, W / 2 - t + bev, 0.01);
+    ring.holes.push(hole);
+    const ringGeo = new THREE.ExtrudeGeometry(ring, { depth: h - 2 * bev, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 3, curveSegments: 4 });
+    ringGeo.rotateX(Math.PI / 2);
+    ringGeo.translate(0, y + h / 2 - bev, 0);
+    this.bumperBoxes = [add(ringGeo, bumperMat, 0, 0, 0)];
+    // team numbers
     const num = makeNumberTexture('201');
-    const plateMat = new THREE.MeshBasicMaterial({ map: num, transparent: true });
-    for (const s of [-1, 1]) {
-      const p = add(new THREE.PlaneGeometry(0.3, 0.1), plateMat, 0, y, s * (W / 2 + 0.002));
-      if (s < 0) p.rotation.y = Math.PI;
+    const plateMat = new THREE.MeshBasicMaterial({ map: num, transparent: true, depthWrite: false });
+    const ph = h * 0.86;
+    for (const [px, pz, ry, wdt] of [[0, W / 2 + 0.002, 0, 0.44], [0, -W / 2 - 0.002, Math.PI, 0.44], [L / 2 + 0.002, 0, Math.PI / 2, 0.36], [-L / 2 - 0.002, 0, -Math.PI / 2, 0.36]]) {
+      const p = add(new THREE.PlaneGeometry(wdt, ph), plateMat, px, y, pz);
+      p.rotation.y = ry;
+      p.castShadow = false;
     }
     target = g;
     // belly pan and superstructure block
@@ -190,6 +207,11 @@ export class Robot {
     const cadMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, metalness: 0.2, roughness: 0.6 });
     object3d.traverse((o) => {
       if (!o.isMesh) return;
+      if (o.name === 'bumper_mesh' || o.material?.name === 'bumper') {
+        // the CAD bumper is only a thin outline; the padded bumper built at its size stands in
+        o.visible = false;
+        return;
+      }
       o.material = o.geometry.attributes.color ? cadMat
         : new THREE.MeshStandardMaterial({ color: o.material.color, flatShading: true, metalness: 0.2, roughness: 0.6 });
       o.castShadow = true;
@@ -345,14 +367,14 @@ function wrap(a) {
 
 function makeNumberTexture(text) {
   const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 96;
+  c.width = 512;
+  c.height = 160;
   const g = c.getContext('2d');
   g.fillStyle = '#ffffff';
-  g.font = 'bold 84px Arial, sans-serif';
+  g.font = 'italic 900 150px "Arial Black", Arial, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(text, 128, 52);
+  g.fillText(text, 256, 86, 500);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

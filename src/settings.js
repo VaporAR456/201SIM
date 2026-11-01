@@ -3,6 +3,10 @@
 const KEY = '201sim.settings.v1';
 
 export const SETTING_DEFS = {
+  graphics: {
+    label: 'Graphics', type: 'choice', options: ['Auto', 'High', 'Medium', 'Low'], def: 'Auto',
+    help: 'Auto starts on High and steps down if the frame rate drops. Low turns off shadows and renders at a lower resolution.',
+  },
   hubPower: {
     label: 'HUB shot power', unit: '%', min: 80, max: 120, step: 1, def: 100,
     help: '100% lands auto shots in the HUB. Raise or lower it to match how the real shooter behaves.',
@@ -40,7 +44,7 @@ export function saveSettings(s) {
 }
 
 /** Fill the Settings panel and keep `settings` updated as sliders move. */
-export function buildSettingsPanel(panel, settings) {
+export function buildSettingsPanel(panel, settings, onChange) {
   const list = panel.querySelector('.settings-list');
   const render = () => {
     list.innerHTML = '';
@@ -51,6 +55,22 @@ export function buildSettingsPanel(panel, settings) {
         row.innerHTML = `<span class="name">${d.label}</span><input type="checkbox" ${settings[k] ? 'checked' : ''}>` +
           `<small>${d.help}</small>`;
         row.querySelector('input').addEventListener('change', (e) => { settings[k] = e.target.checked; saveSettings(settings); });
+      } else if (d.type === 'choice') {
+        row.innerHTML = `<span class="name">${d.label}</span><span></span><span class="choices"></span><small>${d.help}</small>`;
+        const box = row.querySelector('.choices');
+        for (const o of d.options) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = o;
+          b.classList.toggle('on', settings[k] === o);
+          b.addEventListener('click', (e) => {
+            e.preventDefault();
+            settings[k] = o; saveSettings(settings);
+            box.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+            onChange?.(k);
+          });
+          box.appendChild(b);
+        }
       } else {
         row.innerHTML = `<span class="name">${d.label}</span><span class="val"></span>` +
           `<input type="range" min="${d.min}" max="${d.max}" step="${d.step}" value="${settings[k]}">` +
@@ -68,6 +88,7 @@ export function buildSettingsPanel(panel, settings) {
     for (const [k, d] of Object.entries(SETTING_DEFS)) settings[k] = d.def;
     saveSettings(settings);
     render();
+    onChange?.('graphics');
   });
   render();
 }
