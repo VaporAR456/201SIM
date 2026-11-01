@@ -9,6 +9,7 @@ import { buildField } from './field.js';
 import { buildArena } from './arena.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
+import { Humans } from './humans.js';
 import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
@@ -138,7 +139,7 @@ async function init() {
   loadFieldCad(scene).then((ok) => {
     if (!ok) return;
     // the CAD draws everything except the carpet, which stays a flat textured plane
-    for (const c of fieldGroup.children) c.visible = c.userData.carpet === true;
+    for (const c of fieldGroup.children) c.visible = c.userData.carpet === true || c.userData.keep === true;
   });
 
   const robot = new Robot(scene, RAPIER, world, ROBOT_201, settings.alliance);
@@ -288,6 +289,8 @@ async function init() {
   addEventListener('pointerdown', () => sound.unlock());
   addEventListener('keydown', () => sound.unlock());
   game.onShot = () => sound.shot();
+  const humans = new Humans(scene);
+  game.onHumanThrow = (al) => humans.throwBall(al);
   let lastPhase = null;
   let lastCountdown = 0;
   const applyFeel = () => { robot.feel = player.controlFeel === 'Baby mode' ? FEEL_BABY : FEEL_NORMAL; };
@@ -424,6 +427,7 @@ async function init() {
     navPrev = pad ? pad.buttons.map((b) => b.value) : [];
     const alpha = state === 'play' ? acc / STEP : 1;
     robot.sync(dt, alpha);
+    humans.update(dt);
     fuel.sync(alpha);
     game.drawAim();
     game.drawHeld(now / 1000);

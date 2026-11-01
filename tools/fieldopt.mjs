@@ -10,7 +10,7 @@ const doc = await io.read(process.argv[2] || 'field-raw.glb');
 const root = doc.getRoot();
 const scene = root.listScenes()[0];
 const junk = /Fuel\b|bolt|screw|\bnut\b|washer|rivet|cable tie|PEM |\bhinge\b|REV-|bearing|1756A|hook tape|seaming tape|spacer|standoff|insert|bushing|collar|pin\b|clip/i;
-const glass = /glass|polycarb|lexan|clear|Station Window$|Station Window <\d+>$/i;
+const glass = /glass|polycarb|lexan|clear|Hub Funnel Side|Station Window$|Station Window <\d+>$/i;
 let dropped = 0, clear = 0;
 // The CAD is nearly all plain gray. Paint the alliance-colored parts by name (red is at -X in the CAD).
 const BLUE = [0.05, 0.22, 0.75], RED = [0.78, 0.07, 0.07];

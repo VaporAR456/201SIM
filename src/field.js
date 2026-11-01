@@ -31,6 +31,7 @@ export function buildField(scene, RAPIER, world) {
   scene.add(group);
 
   const mat = {
+    depot: new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.6, roughness: 0.4 }),
     carpet: new THREE.MeshStandardMaterial({ map: carpetTexture((FIELD_L + 0.6) / 1.2, (FIELD_W + 0.6) / 1.2), roughness: 1 }),
     tape: new THREE.MeshBasicMaterial({ color: COLORS.tape }),
     steel: new THREE.MeshStandardMaterial({ color: COLORS.steel, metalness: 0.6, roughness: 0.4 }),
@@ -208,16 +209,25 @@ export function buildField(scene, RAPIER, world) {
     // DEPOT floor marking against the alliance wall
     {
       const p = at(DEPOT.depth / 2, DEPOT.fy);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(DEPOT.depth, DEPOT.barrierH, DEPOT.width), mat.wood);
-      m.position.set(p.x, DEPOT.barrierH / 2, p.z);
-      m.receiveShadow = true;
-      group.add(m);
+      // low barrier on the three open sides: FUEL stays in, robots roll over it
+      const t = 2 * IN, hgt = DEPOT.barrierH;
+      const inward = a === BLUE ? 1 : -1;
+      const rails = [
+        [t, DEPOT.width, p.x + inward * (DEPOT.depth / 2 - t / 2), p.z],
+        [DEPOT.depth, t, p.x, p.z - DEPOT.width / 2 + t / 2],
+        [DEPOT.depth, t, p.x, p.z + DEPOT.width / 2 - t / 2],
+      ];
+      for (const [lx, lz, x, z] of rails) {
+        const r = box(lx, hgt, lz, x, hgt / 2, z, mat.depot);
+        r.userData.keep = true;
+        r.userData.collider.setCollisionGroups(groups(GROUP.FIELD, GROUP.FUEL));
+      }
     }
 
     // OUTPOST (human player station) in the alliance wall corner
     {
-      const p = at(OUTPOST.depth / 2, OUTPOST.fy);
-      box(OUTPOST.depth, 8 * IN, OUTPOST.width, p.x, 4 * IN, p.z, mat[a]);
+      // the OUTPOST is built into the alliance wall (the CAD draws it): nothing on the floor to hit
+      void OUTPOST;
     }
   }
 

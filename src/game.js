@@ -251,6 +251,7 @@ export class Game {
       const hv = v * Math.cos(th);
       this.fuel.enable(b, sx, sy, sz, (dx / d) * hv, v * Math.sin(th), (dz / d) * hv);
       b.shot = null;
+      this.onHumanThrow?.(al);
     }
   }
 
