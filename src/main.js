@@ -155,7 +155,10 @@ async function init() {
     match.reset(settings.mode === 'match');
     ui.results.hidden = true;
     ui.scorebar?.classList.remove('final');
+    ui.hud?.classList.remove('final');
+    clearToast?.();
   };
+  let clearToast = null;
   restart();
 
   const modeBtns = document.querySelectorAll('[data-mode]');
@@ -188,7 +191,7 @@ async function init() {
     camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
-  stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; refreshMenu(); restart(); }));
+  stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));
   refreshMenu();
   // camera picker in the pause menu
   const camBtns = document.getElementById('pause-cams');
@@ -201,12 +204,17 @@ async function init() {
   function setCamera(i) {
     camIndex = i;
     camYaw = robot.yaw();
+    // remember it, so Play again (and the next visit) keeps this view
+    settings.cam = i === THIRD ? 'third' : i === THIRD + 1 ? 'overhead' : 'ds';
+    if (i < THIRD) settings.camDs = i;
+    try { localStorage.setItem('201sim.startCam', settings.cam); } catch { /* not saved */ }
+    refreshMenu();
     [...camBtns.children].forEach((b, k) => b.classList.toggle('on', k === i));
   }
   const camName = () => CAMERAS[camIndex];
   const start = () => {
     restart();
-    setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.station);
+    setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.camDs ?? settings.station);
     // otherwise Space (swap camera) would "click" the Start button again
     document.activeElement?.blur?.();
     state = 'play';
@@ -321,7 +329,6 @@ async function init() {
       const wasDisabled = match.disabled;
       if (match.update(dt)) showResults();
       if (match.disabled && !match.over && !wasDisabled) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
-      if (toastT > 0 && (toastT -= dt) <= 0) toastEl.className = '';
       if (match.over && !ui.results.hidden) {
         if (input.pressed('confirm')) keepDriving();
         else if (input.pressed('special1')) start();
@@ -330,6 +337,7 @@ async function init() {
       if (robot.position(tmp).y < -1) restart();
     }
 
+    if (toastT > 0 && (toastT -= dt) <= 0) toastEl.className = '';
     navPrev = pad ? pad.buttons.map((b) => b.value) : [];
     const alpha = state === 'play' ? acc / STEP : 1;
     robot.sync(dt, alpha);
@@ -417,6 +425,7 @@ async function init() {
   // short message under the score bar (fouls, the AUTO-to-TELEOP pause)
   const toastEl = document.getElementById('toast');
   let toastT = 0;
+  clearToast = () => { toastT = 0; toastEl.className = ''; };
   function toast(msg, kind = 'foul', secs = 3) {
     toastEl.textContent = msg;
     toastEl.className = `show ${kind}`;
@@ -429,6 +438,7 @@ async function init() {
     const pts = match.points[mine];
     updateScorebar();
     ui.scorebar.classList.add('final');
+    ui.hud.classList.add('final');
     ui.resultsBody.innerHTML =
       `<table><tr><td>FUEL shot</td><td>${game.shots}</td></tr>` +
       `<tr><td>Scored in an active HUB</td><td>${pts}</td></tr>` +
@@ -461,7 +471,7 @@ async function init() {
       let d = robot.yaw() - camYaw;
       while (d > Math.PI) d -= 2 * Math.PI;
       while (d < -Math.PI) d += 2 * Math.PI;
-      camYaw += d * (1 - Math.exp(-dt * 2.5));
+      camYaw += d * (1 - Math.exp(-dt * 14)); // keeps up with a full-speed spin
       // default: out past the intake, looking back over the robot toward the shooter (which fires
       // out the back), so a HUB shot never puts the camera inside the HUB. Flip for the other side.
       const dir = camFlip ? -1 : 1; // +1: camera on the intake side
@@ -480,7 +490,7 @@ async function init() {
       camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
     }
-    const k = 1 - Math.exp(-dt * (mode === 0 ? 6 : 8));
+    const k = 1 - Math.exp(-dt * (mode === 0 ? 6 : mode === 1 ? 18 : 8));
     camera.position.lerp(camPos, k);
     if (!camera.userData.look) camera.userData.look = camLook.clone();
     camera.userData.look.lerp(camLook, k);
