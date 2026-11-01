@@ -12,4 +12,4 @@ use a built-in stand-in tone.
 | `endgame` | END GAME starts |
 | `end` | final buzzer |
 
-Robot sounds (drive motors, swerve whine, shooter) are generated live in `src/sound.js`.
+Shooter sounds (flywheel, shots) are generated live in `src/sound.js`.
