@@ -56,7 +56,11 @@ export class Robot {
     solid(RAPIER.ColliderDesc.cuboid(L - 2 * t, 0.02, W - 2 * t), 0, hb.floorY - 0.02, 0, 0.6);
     // tower at the back (also what hits the TRENCH arm)
     const towerLen = hb.rearX + L - 2 * t;
-    solid(RAPIER.ColliderDesc.cuboid(towerLen / 2, (cfg.height - hb.floorY) / 2, W - 2 * t), -L + 2 * t + towerLen / 2, (cfg.height + hb.floorY) / 2, 0, 0.6);
+    // The real robot clears the TRENCH arm by only 1/4in, and the physics robot tips a little and
+    // sinks a hair into the carpet, so that 1/4in would snag. Its collision top sits an inch lower
+    // (the model is still full height) with a rounded top edge, so it slides under like the real one.
+    const topY = cfg.height - 0.025, rr = 0.02;
+    solid(RAPIER.ColliderDesc.roundCuboid(towerLen / 2 - rr, (topY - hb.floorY) / 2 - rr, W - 2 * t - rr, rr), -L + 2 * t + towerLen / 2, (topY + hb.floorY) / 2, 0, 0.6);
     // side plates
     // (they reach up to the net, and back into the tower, so there's no gap for FUEL to slip through)
     const sideH = (hb.netY + 0.04 - hb.floorY) / 2;
@@ -64,7 +68,7 @@ export class Robot {
     const sideLen = (L - sideBack) / 2;
     // the solid part stops below the robot's height so it still fits under the TRENCH arm;
     // above that, up to the net, only FUEL feels it
-    const solidTop = cfg.height - 0.01;
+    const solidTop = cfg.height - 0.035;
     const sH = (solidTop - hb.floorY) / 2, uH = (hb.netY + 0.04 - solidTop) / 2;
     for (const sz of [-1, 1]) {
       solid(RAPIER.ColliderDesc.cuboid(sideLen, sH, 0.03), sideBack + sideLen, hb.floorY + sH, sz * (hb.halfW + 0.03), 0.2);

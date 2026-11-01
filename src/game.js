@@ -537,10 +537,12 @@ export class Game {
     // Auto aim points the shooter at the HUB; it doesn't make every ball go in. Real shots
     // scatter, and more so on the move.
     const moving = Math.hypot(v.x, v.z);
-    const spread = (sh.spreadDeg + moving * 1.5) * deg;
+    // Shot accuracy setting: 80% is the tuned shooter, 100% is perfect, lower scatters more
+    const acc = (100 - (this.settings.accuracy ?? 80)) / 20;
+    const spread = (sh.spreadDeg * acc + moving * 1.5 * Math.max(0.4, acc)) * deg;
     const yawN = (aim.err ?? 0) + gauss() * spread;
     const thN = aim.th + gauss() * spread * 0.8;
-    const spd = aim.spd * (1 + gauss() * (sh.speedNoise + moving * 0.01));
+    const spd = aim.spd * (1 + gauss() * (sh.speedNoise * acc + moving * 0.01));
     const cy = Math.cos(yawN), sy = Math.sin(yawN);
     const ux = aim.ux * cy - aim.uz * sy;
     const uz = aim.ux * sy + aim.uz * cy;

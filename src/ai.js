@@ -34,16 +34,18 @@ const LEVELS = [
   { name: 'Hard', react: 0.2, aim: 3.6, speed: 0.95, fire: 3.4, intake: 1.15, think: 0.2, mistakes: 0.07 },
   { name: 'Challenging', react: 0.1, aim: 2.2, speed: 1.1, fire: 6.5, intake: 2.0, think: 0.1, mistakes: 0.02 },
   // the world's best (300+ EPA): only real teams this good get here
-  { name: 'Elite', react: 0.07, aim: 1.6, speed: 1.15, fire: 10, intake: 3.2, think: 0.08, mistakes: 0.01 },
+  { name: 'Elite', react: 0.05, aim: 1.5, speed: 1.35, fire: 10, intake: 6, think: 0.07, mistakes: 0.01 },
 ];
-export const AI_LEVEL_NAMES = [...LEVELS.slice(0, 4).map((l) => l.name), 'Realistic', 'Adaptive'];
+export const AI_LEVEL_NAMES = ['Challenging', 'Realistic', 'Adaptive'];
 /** A skill between the levels: t = 0 (Easy) .. 3 (Challenging) .. 4 (Elite). Below 0 is weaker still. */
 function levelAt(t) {
   const weak = Math.min(0, t);
+  const over = clamp(t - 4, 0, 1.2); // past Elite: only used to keep a top team on its real pace
   t = clamp(t, 0, 4);
   const i = Math.min(3, Math.floor(t)), f = t - i, A = LEVELS[i], B = LEVELS[i + 1];
-  const out = { t };
+  const out = { t: t + over };
   for (const k of ['react', 'aim', 'speed', 'fire', 'intake', 'think', 'mistakes']) out[k] = A[k] + (B[k] - A[k]) * f;
+  if (over) { out.intake *= 1 + over * 0.6; out.speed = Math.min(1.5, out.speed * (1 + over * 0.12)); out.fire *= 1 + over * 0.3; }
   // the weakest real robots barely score: slower cycles, worse aim
   if (weak < 0) { out.fire *= 1 + weak * 0.6; out.intake *= 1 + weak * 0.5; out.aim *= 1 - weak * 0.5; out.t = weak; }
   return out;
@@ -82,6 +84,8 @@ const POOLS = {
   Challenging: () => uniq([MILSTEIN, TOP]).filter((e) => e.epa > 150 && !ELITE[e.team]),
   all: () => uniq([MIDLAND, TROY, STATES, MILSTEIN, TOP]),
 };
+/** Every team you can pick to play against, best first. */
+export const TEAM_LIST = POOLS.all().sort((a, b) => b.epa - a.epa);
 // Realistic: 201's 2026 season from FIRST's match results (alliance scores, quals). Each match
 // is set at one of these events' level, and the robots in it are spread around that level the
 // way real alliances mix strong and weak robots.
@@ -334,7 +338,7 @@ class Bot {
     this.root.position.lerpVectors(this.prev, this.cur, alpha);
     this.root.position.y += this.climbY || 0;
     this.root.rotation.y = this.prevYaw + wrap(this.curYaw - this.prevYaw) * alpha;
-    this.fuelVis.count = Math.min(12, Math.ceil(this.load / Math.max(1, this.type.cap / 12)));
+    this.fuelVis.count = Math.min(12, Math.ceil(this.load / Math.max(1, (this.cap || this.type.cap) / 12)));
   }
 }
 
@@ -362,7 +366,7 @@ export class AIPlayers {
    * Set up a match: `mine` robots on your alliance (counting 201) and `theirs` on the other,
    * at a difficulty. A seed makes the same personalities come back.
    */
-  setup({ alliance, station, mine, theirs, level, seed }) {
+  setup({ alliance, station, mine, theirs, level, seed, picks = [] }) {
     this.clear();
     if (!this.nav) return;
     this.alliance = alliance;
@@ -389,6 +393,7 @@ export class AIPlayers {
     this.boost = 0; this.adaptT = 0;
     const gaussR = () => { let u = rand() || 1e-6, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
     const used = new Set([201]);
+    for (const n of picks.slice(0, theirs)) if (n) used.add(n); // nobody else gets your picks
     const draw = () => {
       const left = pool.filter((e) => !used.has(e.team));
       const e = left[Math.floor(rand() * left.length)] || entry([100 + Math.floor(rand() * 9000), 'Team', 80, 0, 10]);
@@ -400,6 +405,7 @@ export class AIPlayers {
       if (e.tower > 3) return 'Climber';
       const t = epaToT(e.epa);
       if (t < 0.7 && rand() < 0.5) return rand() < 0.5 ? 'Defender' : 'Feeder';
+      if (t >= 2.8) return 'Shooter'; // the top teams are all high-volume shooters
       const r = rand();
       return r < 0.2 ? 'Feeder' : r < 0.3 ? 'Defender' : 'Shooter';
     };
@@ -419,12 +425,17 @@ export class AIPlayers {
       const lv = levelAt(baseT);
       // the ones whose robots we know: their real shot rate, shooting on the move
       if (elite) { lv.fire = elite.bps / TYPES.Shooter.fire; lv.aim = Math.min(lv.aim, 1.5); }
+      const eliteFire = elite ? lv.fire : 0;
       const b = new Bot(this.scene, this.RAPIER, this.world, al, e.team, typeName, lv, pers);
       b.slot = slot;
       b.name = e.name;
       b.epa = e.epa;
       b.onMove = !!elite?.onMove || lv.t > 3.2;
       b.baseT = baseT;
+      b.eliteFire = eliteFire;
+      b.corr = 0;
+      // the best robots carry more (bigger hoppers): up to half again at the top
+      b.cap = Math.round(TYPES[typeName].cap * (1 + Math.max(0, lv.t - 2) * 0.25));
       b.elite = !!elite;
       b.sloppy = rand(); // how careful it is about fouls this match
       // TOWER: from how many TOWER points the team really averages
@@ -442,9 +453,13 @@ export class AIPlayers {
       const r = rand();
       const n = Math.min(theirs, r < 0.15 ? 2 : r < 0.6 ? 1 : 0);
       const names = Object.keys(ELITE).map(Number).sort(() => rand() - 0.5);
-      for (let i = 0; i < n; i++) { const e = entry(TOP.find((x) => x[0] === names[i])); used.add(e.team); elites.push(e); }
+      for (let i = 0; i < n; i++) { if (picks.includes(names[i])) continue; const e = entry(TOP.find((x) => x[0] === names[i])); used.add(e.team); elites.push(e); }
     }
-    for (let i = 0; i < theirs; i++) add(other(alliance), i, elites[i] || draw());
+    // teams you picked yourself take their slots first
+    for (let i = 0; i < theirs; i++) {
+      const pk = picks[i] ? TEAM_LIST.find((e) => e.team === picks[i]) : null;
+      add(other(alliance), i, pk || elites.shift() || draw());
+    }
     // each alliance's coach picks a strategy: the opponents learn which ones beat you
     this.coach = {};
     for (const al of [BLUE, RED]) {
@@ -464,12 +479,14 @@ export class AIPlayers {
   /** Back to the starting spots with the preload. */
   reset() {
     this.g403 = new Map();
+    this.paceT = 0;
     for (const b of this.bots) {
       const p = fieldToWorld(0.95, STATIONS[b.slot].fy, b.alliance);
       const p2 = fieldToWorld(ALLIANCE_ZONE_DEPTH - 0.6, STATIONS[b.slot].fy, b.alliance);
       b.reset(p2.x, p2.z, Math.atan2(-(p2.z - p.z), p2.x - p.x));
       b.load = 8; b.scored = 0; b.shots = 0; b.fireT = 0;
       b.climbY = 0; b.towerPts = 0; b.pinT = 0; b.fouls = 0;
+      b.corr = 0; b.defT = 0; if (b.baseT != null) Object.assign(b.level, levelAt(b.baseT), b.eliteFire ? { fire: b.eliteFire } : {});
       b.thinkT = Math.random() * 0.3;
     }
     for (const al of [BLUE, RED]) if (this.coach?.[al]) this.coach[al].t = 0;
@@ -517,11 +534,36 @@ export class AIPlayers {
     const t = Math.max(25, match.t);
     const want = clamp((lead / t) * 3.2 + lead / 60, -1.2, 2.2);
     this.boost += (want - this.boost) * 0.45;
+  }
+
+  /**
+   * Keep every robot on its real team's pace. Each AI robot is a real team with a real EPA
+   * (points it adds per match). Every few seconds it compares what it has scored with what that
+   * team would have by now, and sharpens or eases its own driving to match, so over a match it
+   * lands near its real number whatever traffic and defense it ran into. (Adaptive then moves the
+   * other alliance up or down on top of that.)
+   */
+  pace(game, match, dt) {
+    if (!match?.on || match.over || match.disabled) return;
+    this.paceT = (this.paceT || 0) - dt;
+    if (this.paceT > 0) return;
+    this.paceT = 3;
+    const frac = clamp(match.t / 163, 0, 1);
     for (const b of this.bots) {
-      if (b.alliance === this.alliance || b.elite) continue;
-      const lv = levelAt(b.baseT + this.boost);
+      if (b.epa == null) continue;
+      // defending isn't scoring: don't count that time against it
+      if (b.task.kind === 'defend') { b.defT = (b.defT || 0) + 3; continue; }
+      const want = Math.max(0, b.epa) * clamp((match.t - (b.defT || 0)) / 163, 0, 1);
+      const have = b.scored + (b.towerPts || 0);
+      if (frac > 0.12) {
+        const err = (want - have) / Math.max(15, want);
+        b.corr = clamp(b.corr + clamp(err, -0.5, 0.5) * 0.35, -1.2, 1.6);
+      }
+      const boost = this.levelName === 'Adaptive' && b.alliance !== this.alliance ? this.boost : 0;
+      const lv = levelAt(b.baseT + b.corr + boost);
+      if (b.eliteFire) { lv.fire = b.eliteFire * (1 + clamp(b.corr, -0.5, 0.4)); lv.aim = Math.min(lv.aim, 1.5); }
       Object.assign(b.level, lv);
-      b.onMove = lv.t > 3.2;
+      b.onMove = !!b.elite || lv.t > 3.2;
     }
   }
 
@@ -554,6 +596,7 @@ export class AIPlayers {
     const disabled = match?.disabled;
     for (const al of [BLUE, RED]) this.coachThink(al, ctx, game, dt);
     if (this.levelName === 'Adaptive') this.adapt(game, match, dt);
+    this.pace(game, match, dt);
     this.referee(robot, game, dt);
     for (const b of this.bots) {
       if (disabled) { b.drive(0, 0, 0, dt); continue; }
@@ -660,8 +703,12 @@ export class AIPlayers {
     else if (theirShift) wantDefense = c.defense > 0.3 && c.strat !== 'race' || c.defense > 0.75;
     else if (c.strat === 'balanced') wantDefense = c.defense > 0.6 && (diff < -10 || youThreat > 30);
     if (wantDefense && (mine.length > 1 || theirShift || c.strat === 'deny')) {
-      defender = mine.reduce((a, b) => (b.p.aggression - b.load * 0.02 > a.p.aggression - a.load * 0.02 ? b : a));
+      // the one whose scoring we'd miss least: aggressive, light on FUEL, and not our best shooter
+      const dv = (r) => r.p.aggression - r.load * 0.02 - Math.max(0, r.level.t) * 0.35 - (r.elite ? 2 : 0);
+      defender = mine.reduce((a, b) => (dv(b) > dv(a) ? b : a));
       if (defender.p.aggression + c.defense < 0.6) defender = null;
+      // a top scorer doesn't get sent to play defense: it fills up and passes for the next shift
+      if (defender && (defender.elite || defender.level.t > 3.3) && c.strat !== 'deny') defender = null;
     }
     // who to guard: the biggest threat on the other alliance (you, or one of their AI). Your own
     // teammates never pick you. A robot hanging on its TOWER is off limits.
@@ -686,7 +733,7 @@ export class AIPlayers {
     const al = b.alliance;
     const lv = b.level;
     const strat = this.coach[al].strat;
-    const full = b.load / b.type.cap;
+    const full = b.load / b.cap;
     const active = ctx.active(al);
     const soon = ctx.untilActive(al);
     const options = [];
@@ -701,7 +748,7 @@ export class AIPlayers {
       options.push({ kind: ready ? 'score' : 'stage', u: ready ? u : u * 0.55 });
     }
     // collect: worth more the emptier we are
-    if (b.load < b.type.cap) {
+    if (b.load < b.cap) {
       let u = (1 - full) * 0.95;
       if (!active && strat === 'hoard') u *= 1.3;
       options.push({ kind: 'collect', u });
@@ -800,6 +847,8 @@ export class AIPlayers {
     const sign = al === BLUE ? -1 : 1;
     const balls = this.fuel.balls;
     const claimed = new Set(this.bots.filter((o) => o !== b && o.task.ball).map((o) => o.task.ball));
+    const near = this.bots.filter((o) => o !== b).map((o) => ({ ...o.pos(), mate: o.alliance === al }));
+    if (this.youPos) near.push({ x: this.youPos.x, z: this.youPos.z, mate: al === this.alliance });
     let best = null, bs = Infinity;
     for (let n = 0; n < 160; n++) {
       const ball = balls[(Math.random() * balls.length) | 0];
@@ -817,6 +866,15 @@ export class AIPlayers {
       if (this.ctx && !this.ctx.active(al) && this.inZone(q, al)) s += 3;
       s += (Math.sign(q.z) === b.p.side * (al === BLUE ? 1 : -1) ? -0.6 : 0.6) * (1 - b.p.risk * 0.5);
       for (const o of this.bots) if (o !== b && o.task.ball) { const t = o.task.ball.body.translation(); if (Math.hypot(t.x - q.x, t.z - q.z) < 1.5) s += 1.2; }
+      // where everyone is: a ball right next to a teammate is theirs to take; one next to an
+      // opponent is a fight (worth it only to an aggressive driver); clusters are worth more
+      for (const r of near) {
+        const d = Math.hypot(r.x - q.x, r.z - q.z);
+        if (d < 1.6) s += r.mate ? 2.2 - d : (1.4 - d) * (1 - b.p.aggression);
+      }
+      let cl = 0;
+      for (let k = 0; k < 6; k++) { const o = balls[(Math.random() * balls.length) | 0]; if (o.active && !o.inRobot) { const t = o.body.translation(); if (Math.hypot(t.x - q.x, t.z - q.z) < 1.2 && t.y < 0.2) cl++; } }
+      s -= cl * 0.35;
       if (s < bs) { bs = s; best = ball; }
     }
     return best;
@@ -957,7 +1015,8 @@ export class AIPlayers {
     // wide berth and stay out of the line between you and the HUB while you're shooting.
     if (t.kind !== 'defend') {
       const mate = b.alliance === this.alliance;
-      const others = [...this.bots.filter((o) => o !== b).map((o) => ({ q: o.pos(), r: 1.5 })), { q: ctx.robot.body.translation(), r: mate ? 2.4 : 1.5 }];
+      // teammates keep well apart (they talk to each other); opponents only avoid a head-on crash
+      const others = [...this.bots.filter((o) => o !== b).map((o) => ({ q: o.pos(), r: o.alliance === b.alliance ? 1.9 : 1.25 })), { q: ctx.robot.body.translation(), r: mate ? 2.4 : 1.25 }];
       for (const { q: o, r } of others) {
         const dx = p.x - o.x, dz = p.z - o.z, d = Math.hypot(dx, dz);
         if (d < r && d > 0.01) { const k = (r - d) * 2.2; vx += (dx / d) * k; vz += (dz / d) * k; }
@@ -988,7 +1047,7 @@ export class AIPlayers {
 
   /** FUEL that reaches the intake goes in the hopper. */
   collect(b, dt) {
-    if (b.load >= b.type.cap) return;
+    if (b.load >= b.cap) return;
     // the intake can only swallow so many a second
     b.intakeBudget = Math.min(2, (b.intakeBudget || 0) + dt * b.type.intake * b.level.intake);
     if (b.intakeBudget < 1) return;
@@ -1006,7 +1065,7 @@ export class AIPlayers {
         b.load++;
         b.intakeBudget -= 1;
         if (b.intakeBudget < 1) return;
-        if (b.load >= b.type.cap) return;
+        if (b.load >= b.cap) return;
       }
     }
   }

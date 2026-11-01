@@ -23,6 +23,10 @@ export const SETTING_DEFS = {
     label: 'Pass power boost', unit: '%', min: 100, max: 200, step: 5, def: 140,
     help: 'How much harder the shooter spins when passing, so you can reach your alliance zone from across the field. 100% means no boost.',
   },
+  accuracy: {
+    label: 'Shot accuracy', unit: '%', min: 40, max: 100, step: 5, def: 80,
+    help: 'How tight the shots are. 100% puts every auto shot dead center; 80% is a good real shooter; lower scatters more. Shooting on the move still adds spread.',
+  },
   bpsTotal: {
     label: 'Fire rate', unit: ' FUEL/s', min: 2, max: 16, step: 0.5, def: 8,
     help: '201 has a double shooter: two exits that fire side by side, one FUEL each per volley. This is the total for both (201\'s best is about 9, average about 7).',

@@ -33,11 +33,12 @@
         </div>
         <div class="mm-opt">
           <span class="label">Play vs AI</span>
-          <div class="seg"><button data-vs="off">Off</button><button data-vs="1v1">1v1</button><button data-vs="2v2">2v2</button><button data-vs="3v3">3v3</button></div>
+          <div class="seg wrap"><button data-vs="off">Off</button><button data-vs="1v1">1v1</button><button data-vs="1v2">1v2</button><button data-vs="1v3">1v3</button><button data-vs="2v2">2v2</button><button data-vs="3v3">3v3</button></div>
         </div>
         <div class="mm-opt" id="ai-level-opt">
           <span class="label">AI skill</span>
-          <div class="seg wrap"><button data-ailevel="Easy">Easy</button><button data-ailevel="Medium">Medium</button><button data-ailevel="Hard">Hard</button><button data-ailevel="Challenging">Challenging</button><button data-ailevel="Realistic" title="Robots and scores like 201's real 2026 matches">Realistic</button><button data-ailevel="Adaptive" title="Moves toward close matches">Adaptive</button></div>
+          <div class="seg wrap"><button data-ailevel="Challenging" title="Champs-level teams, sometimes 1690, 4414 or 1323">Challenging</button><button data-ailevel="Realistic" title="Robots and scores like 201's real 2026 matches">Realistic</button><button data-ailevel="Adaptive" title="Moves toward close matches">Adaptive</button></div>
+          <div id="pick-teams"></div>
           <p class="hint">The AI learns how you play and what beats you, saved in this browser. <button id="ai-forget" type="button">Reset AI memory</button></p>
         </div>
         <div class="mm-opt">

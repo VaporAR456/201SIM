@@ -11,7 +11,7 @@ import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
 import { PadNav } from './padnav.js';
 import { Humans } from './humans.js';
 import { HubLights } from './hublights.js';
-import { AIPlayers, resetAiMemory } from './ai.js';
+import { AIPlayers, resetAiMemory, TEAM_LIST } from './ai.js';
 import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
@@ -62,8 +62,8 @@ try { settings.preload = localStorage.getItem('201sim.preload') !== 'off'; } cat
 try { settings.spawn = localStorage.getItem('201sim.spawn') || 'station'; } catch { settings.spawn = 'station'; }
 // Play vs AI: robots per alliance ("off", or "1v1".."3v3") and the AI's skill
 try { settings.vs = localStorage.getItem('201sim.vs') || 'off'; } catch { settings.vs = 'off'; }
-try { settings.aiLevel = localStorage.getItem('201sim.aiLevel') || 'Medium'; } catch { settings.aiLevel = 'Medium'; }
-settings.aiLevel = { Rookie: 'Easy', District: 'Medium', Champs: 'Hard' }[settings.aiLevel] ?? settings.aiLevel;
+try { settings.aiLevel = localStorage.getItem('201sim.aiLevel') || 'Realistic'; } catch { settings.aiLevel = 'Realistic'; }
+if (!['Challenging', 'Realistic', 'Adaptive'].includes(settings.aiLevel)) settings.aiLevel = 'Realistic';
 
 async function init() {
   await RAPIER.init();
@@ -169,7 +169,7 @@ async function init() {
     if (settings.vs === 'off') { ai.clear(); return; }
     if (!ai.nav) ai.buildNav(robot.body);
     const [mine, theirs] = settings.vs.split('v').map(Number);
-    ai.setup({ alliance: settings.alliance, station: settings.station, mine, theirs, level: settings.aiLevel });
+    ai.setup({ alliance: settings.alliance, station: settings.station, mine, theirs, level: settings.aiLevel, picks: settings.picks });
     const lineup = ai.bots.filter((b) => b.alliance !== settings.alliance).map((b) => `${b.team} ${b.name}`).join(', ');
     if (ai.elites.length) setTimeout(() => toast(`Heads up: ${ai.elites.map((b) => `${b.team} ${b.name}`).join(' and ')} on the other alliance`, 'info', 5), 300);
     else if (ai.event) setTimeout(() => toast(`Realistic: a ${ai.event.name} level match`, 'info', 4), 300);
@@ -244,6 +244,30 @@ async function init() {
     try { localStorage.setItem('201sim.aiLevel', settings.aiLevel); } catch { /* not saved */ }
     refreshMenu();
   }));
+  // pick the teams you play against: a slider per opponent (works with the controller's left /
+  // right), Random at the far left, then every team from best to worst
+  try { settings.picks = JSON.parse(localStorage.getItem('201sim.picks')) || []; } catch { settings.picks = []; }
+  const pickBox = document.getElementById('pick-teams');
+  const teamLabel = (n) => { const e = TEAM_LIST.find((t) => t.team === n); return e ? `${e.team} ${e.name} · EPA ${Math.round(e.epa)}` : 'Random team'; };
+  const renderPicks = () => {
+    const theirs = settings.vs === 'off' ? 0 : +settings.vs.split('v')[1];
+    pickBox.innerHTML = '';
+    for (let i = 0; i < theirs; i++) {
+      const row = document.createElement('label');
+      row.className = 'pick-row';
+      const cur = settings.picks[i] || 0;
+      const idx = cur ? TEAM_LIST.findIndex((t) => t.team === cur) + 1 : 0;
+      row.innerHTML = `<span>Opponent ${i + 1}</span><input type="range" min="0" max="${TEAM_LIST.length}" step="1" value="${idx}"><b>${teamLabel(cur)}</b>`;
+      const sl = row.querySelector('input'), lab = row.querySelector('b');
+      sl.addEventListener('input', () => {
+        const v = +sl.value;
+        settings.picks[i] = v ? TEAM_LIST[v - 1].team : 0;
+        lab.textContent = teamLabel(settings.picks[i]);
+        try { localStorage.setItem('201sim.picks', JSON.stringify(settings.picks)); } catch { /* not saved */ }
+      });
+      pickBox.appendChild(row);
+    }
+  };
   const mapBtns = document.querySelectorAll('[data-map]');
   mapBtns.forEach((b) => b.addEventListener('click', () => {
     settings.map = b.dataset.map;
@@ -285,6 +309,7 @@ async function init() {
     document.querySelectorAll('[data-vs]').forEach((b) => b.classList.toggle('on', b.dataset.vs === settings.vs));
     document.querySelectorAll('[data-ailevel]').forEach((b) => b.classList.toggle('on', b.dataset.ailevel === settings.aiLevel));
     document.getElementById('ai-level-opt').hidden = settings.vs === 'off';
+    if (pickBox.childElementCount !== (settings.vs === 'off' ? 0 : +settings.vs.split('v')[1])) renderPicks();
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));

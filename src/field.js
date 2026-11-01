@@ -148,8 +148,11 @@ export function buildField(scene, RAPIER, world) {
         const len = Math.hypot(b1[0] - b0[0], b1[1] - b0[1]);
         const tilt = Math.atan2(b1[0] - b0[0], b1[1] - b0[1]);
         const a = -out * tilt;
-        const desc = RAPIER.ColliderDesc.cuboid(0.02, len / 2, 0.71)
-          .setTranslation(p.x + out * (b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2, p.z)
+        // thick on the NEUTRAL ZONE side: a fast shot from out there moves ~25 cm a physics step
+        // and would tunnel straight through a thin net
+        const th = 0.12, nx = out * Math.cos(tilt), ny = -Math.sin(tilt);
+        const desc = RAPIER.ColliderDesc.cuboid(th, len / 2, 0.71)
+          .setTranslation(p.x + out * (b0[0] + b1[0]) / 2 + nx * (th - 0.02), (b0[1] + b1[1]) / 2 + ny * (th - 0.02), p.z)
           .setRotation({ x: 0, y: 0, z: Math.sin(a / 2), w: Math.cos(a / 2) })
           .setFriction(0.3).setRestitution(0.1); // a net soaks up the hit
         world.createCollider(desc, fixed);
