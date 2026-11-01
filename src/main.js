@@ -45,7 +45,8 @@ const ui = {
   resultsBody: document.getElementById('results-body'),
 };
 
-const settings = { alliance: BLUE, station: 1, mode: 'match' };
+const settings = { alliance: BLUE, station: 1, mode: 'match', cam: 'ds' };
+try { settings.cam = localStorage.getItem('201sim.startCam') || 'ds'; } catch { /* default */ }
 
 async function init() {
   await RAPIER.init();
@@ -152,6 +153,12 @@ async function init() {
   restart();
 
   const modeBtns = document.querySelectorAll('[data-mode]');
+  const camStartBtns = document.querySelectorAll('[data-cam]');
+  camStartBtns.forEach((b) => b.addEventListener('click', () => {
+    settings.cam = b.dataset.cam;
+    try { localStorage.setItem('201sim.startCam', settings.cam); } catch { /* not saved */ }
+    refreshMenu();
+  }));
   modeBtns.forEach((b) => b.addEventListener('click', () => { settings.mode = b.dataset.mode; refreshMenu(); }));
   // after a match: shrink the score bar back and keep driving in free play, or go again
   const keepDriving = () => {
@@ -172,6 +179,7 @@ async function init() {
     allianceBtns.forEach((b) => b.classList.toggle('on', b.dataset.alliance === settings.alliance));
     stationBtns.forEach((b) => b.classList.toggle('on', +b.dataset.station === settings.station));
     modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === settings.mode));
+    camStartBtns.forEach((b) => b.classList.toggle('on', b.dataset.cam === settings.cam));
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; refreshMenu(); restart(); }));
@@ -192,7 +200,7 @@ async function init() {
   const camName = () => CAMERAS[camIndex];
   const start = () => {
     restart();
-    setCamera(settings.station);
+    setCamera(settings.cam === 'third' ? THIRD : settings.cam === 'overhead' ? THIRD + 1 : settings.station);
     // otherwise Space (swap camera) would "click" the Start button again
     document.activeElement?.blur?.();
     state = 'play';
