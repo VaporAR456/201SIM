@@ -8,6 +8,7 @@ import { HALF_L, HALF_W, FIELD_W, BLUE, RED, fieldToWorld, ALLIANCE_ZONE_DEPTH, 
 import { buildField } from './field.js';
 import { buildArena } from './arena.js';
 import { Robot, FEEL_NORMAL, FEEL_BABY } from './robot.js';
+import { PadNav } from './padnav.js';
 import { Sound } from './sound.js';
 import { Input, ACTIONS, PAD } from './input.js';
 import { ControlsScreen } from './controls.js';
@@ -258,7 +259,9 @@ async function init() {
     ui.scorebar.hidden = false; ui.scorebar.classList.remove('final');
   };
   document.getElementById('start').addEventListener('click', start);
-  document.getElementById('resume').addEventListener('click', () => { state = 'play'; ui.pause.hidden = true; document.activeElement?.blur?.(); });
+  const resume = () => { state = 'play'; ui.pause.hidden = true; document.activeElement?.blur?.(); };
+  document.getElementById('resume').addEventListener('click', resume);
+  document.getElementById('pause-restart').addEventListener('click', () => start());
   document.getElementById('to-menu').addEventListener('click', () => { state = 'menu'; ui.pause.hidden = true; ui.menu.hidden = false; ui.hud.hidden = true; ui.scorebar.hidden = true; });
 
   // Controls screen, opened from the main menu or the pause menu
@@ -308,6 +311,7 @@ async function init() {
   // Menu navigation reads the controller's standard buttons directly, so it works even if the
   // in-game bindings were remapped
   let navPrev = [];
+  const nav = new PadNav();
   const navPressed = (pad, i) => !!pad && (pad.buttons[i]?.value ?? 0) > 0.5 && !(navPrev[i] > 0.5);
 
   // ------------------------------------------------------------ loop
@@ -332,23 +336,30 @@ async function init() {
       controls.update();
     } else if (!settingsPanel.hidden) {
       if (navPressed(pad, PAD.B)) closeSettings();
+      else nav.update(settingsPanel, pad, dt);
     } else if (state === 'menu') {
-      if (input.pressed('confirm')) start();
-      // controller: D-pad picks station, X / B pick alliance, Y opens Controls
-      if (navPressed(pad, PAD.LEFT)) { settings.station = Math.max(0, settings.station - 1); refreshMenu(); restart(); }
-      if (navPressed(pad, PAD.RIGHT)) { settings.station = Math.min(2, settings.station + 1); refreshMenu(); restart(); }
-      if (navPressed(pad, PAD.X)) { settings.alliance = BLUE; refreshMenu(); restart(); }
-      if (navPressed(pad, PAD.B)) { settings.alliance = RED; refreshMenu(); restart(); }
-      if (navPressed(pad, PAD.Y)) openControls();
-    } else if (state === 'paused') {
-      if (input.pressed('pause') || input.pressed('confirm')) { state = 'play'; ui.pause.hidden = true; }
+      // controller: D-pad / stick moves, A presses, X / B pick alliance, Y opens Controls
+      const used = nav.update(ui.menu, pad, dt);
+      if (!used && input.pressed('confirm') && !navPressed(pad, PAD.A)) start();
+      else if (navPressed(pad, PAD.X)) { settings.alliance = BLUE; refreshMenu(); restart(); }
+      else if (navPressed(pad, PAD.B)) { settings.alliance = RED; refreshMenu(); restart(); }
       else if (navPressed(pad, PAD.Y)) openControls();
+    } else if (state === 'paused') {
+      const used = nav.update(ui.pause, pad, dt);
+      if (used) { /* A pressed the highlighted button */ }
+      else if (input.pressed('pause') || navPressed(pad, PAD.B) || (input.pressed('confirm') && !navPressed(pad, PAD.A))) resume();
+      else if (navPressed(pad, PAD.Y)) openControls();
+      else if (navPressed(pad, PAD.VIEW)) start();
     } else if (state === 'play') {
-      if (input.pressed('pause')) { state = 'paused'; ui.pause.hidden = false; }
-      if (input.pressed('toggleFieldRel')) robot.fieldRelative = !robot.fieldRelative;
-      if (input.pressed('resetGyro')) robot.fieldForward = robot.yaw();
-      if (input.pressed('swapCamera')) setCamera((camIndex + 1) % CAMERAS.length);
-      if (input.pressed('flipCamera')) camFlip = !camFlip;
+      if (input.pressed('pause')) { state = 'paused'; ui.pause.hidden = false; nav.reset(); }
+      // with the results up, the D-pad moves between its buttons instead
+      const resultsUp = match.over && !ui.results.hidden;
+      if (!resultsUp) {
+        if (input.pressed('toggleFieldRel')) robot.fieldRelative = !robot.fieldRelative;
+        if (input.pressed('resetGyro')) robot.fieldForward = robot.yaw();
+        if (input.pressed('swapCamera')) setCamera((camIndex + 1) % CAMERAS.length);
+        if (input.pressed('flipCamera')) camFlip = !camFlip;
+      }
       if (input.pressed('speed1')) robot.speedScale = robot.cfg.speedLevels[0];
       if (input.pressed('speed2')) robot.speedScale = robot.cfg.speedLevels[1];
       if (input.pressed('speed3')) robot.speedScale = robot.cfg.speedLevels[2];
@@ -396,7 +407,9 @@ async function init() {
       } else { lastPhase = null; lastCountdown = 0; }
       if (match.disabled && !match.over && !wasDisabled && match.countdown === 0) toast('AUTO over: robots disabled until TELEOP', 'info', 3);
       if (match.over && !ui.results.hidden) {
-        if (input.pressed('confirm')) keepDriving();
+        const used = nav.update(ui.results, pad, dt);
+        if (used) { /* A pressed the highlighted button */ }
+        else if (input.pressed('confirm') && !navPressed(pad, PAD.A)) keepDriving();
         else if (input.pressed('special1')) start();
       }
       // fell through the world somehow: put it back
