@@ -85,6 +85,8 @@ export class Fuel {
     // check sees it arrive and makes it held FUEL (the TRENCH arm skips held FUEL)
     b.inRobot = false;
     b.queued = false;
+    b.human = null;
+    b.bot = null;
     b.active = true;
     b.body.setEnabled(true);
     b.body.setTranslation({ x, y, z }, true);

@@ -69,13 +69,15 @@ export class Game {
   }
 
   reset() {
-    this.human = { stash: 0, t: 0, thrown: 0 };
+    // a human player for each alliance; `human` is yours (the HUD shows it)
+    this.humans = { [BLUE]: { stash: 0, t: 0, thrown: 0 }, [RED]: { stash: 0, t: 0, thrown: 0 } };
     this.netBroken = false;
     this.strain = 0;
     this.spillT = 0;
     if (this.wob) Object.assign(this.wob, { y: 0, vy: 0, z: 0, vz: 0, x: 0, vx: 0 });
     this.score = { [BLUE]: 0, [RED]: 0 };
     this.fouls = [];
+    this.aiFouls = [];
     this.ejected = 0;
     this.lastG407 = -99;
     this.shots = 0;
@@ -207,13 +209,21 @@ export class Game {
 
   // ------------------------------------------------------------ human player
   /**
-   * 201's human player stands behind the OUTPOST. FUEL you deliver there (shoot, pass or push it
+   * Each alliance has a human player behind its OUTPOST. FUEL you deliver there (shoot, pass or push it
    * into the OUTPOST) goes into their stash, and they throw it into your HUB whenever it's active.
    * Good throws, not perfect ones.
    */
+  get human() { return this.humans[this.alliance]; }
+
   humanPlayer(dt) {
-    const h = this.human;
-    const al = this.alliance;
+    for (const al of [BLUE, RED]) this.humanFor(al, dt);
+  }
+
+  /** Hand FUEL straight to an alliance's human player (an AI robot dumping into the OUTPOST). */
+  feedHuman(al, n) { this.humans[al].stash += n; }
+
+  humanFor(al, dt) {
+    const h = this.humans[al];
     const sign = al === BLUE ? -1 : 1;
     const o = fieldToWorld(OUTPOST.depth / 2, OUTPOST.fy, al);
     const hx = OUTPOST.depth / 2 + 0.25, hz = OUTPOST.width / 2 + 0.2;
@@ -230,12 +240,12 @@ export class Game {
         }
       }
     }
-    // throw: one every ~1.3 s while the HUB counts
+    // throw: about one every 0.6 s while the HUB counts
     const active = this.match ? this.match.isActive(al) && !this.match.over : true;
-    if (h.stash > 0 && active && h.t > 1.3) {
+    if (h.stash > 0 && active && h.t > 0.65) {
       const b = this.fuel.takeSpare();
       if (!b) return;
-      h.t = Math.random() * 0.3;
+      h.t = Math.random() * 0.15;
       h.stash--;
       h.thrown++;
       const hub = hubCenter(al);
@@ -251,6 +261,7 @@ export class Game {
       const hv = v * Math.cos(th);
       this.fuel.enable(b, sx, sy, sz, (dx / d) * hv, v * Math.sin(th), (dz / d) * hv);
       b.shot = null;
+      b.human = al;
       this.onHumanThrow?.(al);
     }
   }
@@ -533,6 +544,24 @@ export class Game {
     const live = !this.match?.over;
     if (live) { this.score[opp] += pts; if (this.match) this.match.points[opp] += pts; this.fouls.push({ kind, rule, why, pts }); }
     this.onFoul?.(`${kind} FOUL ${rule}: ${why}${live ? ` (+${pts} ${opp.toUpperCase()})` : ''}`);
+  }
+
+  /** A foul by an AI robot on `al`: points to the other alliance. */
+  foulBy(al, team, kind, rule, why) {
+    const pts = kind === 'MAJOR' ? 15 : 5;
+    const opp = al === BLUE ? RED : BLUE;
+    if (this.match?.over) return;
+    this.score[opp] += pts;
+    if (this.match) this.match.points[opp] += pts;
+    (this.aiFouls ||= []).push({ al, team, kind, rule, pts });
+    this.onFoul?.(`${kind} FOUL ${rule} on ${team}: ${why} (+${pts} ${opp.toUpperCase()})`);
+  }
+
+  /** TOWER points for an alliance (AI robots that climb). */
+  addTower(al, pts) {
+    if (this.match?.over) return;
+    this.score[al] += pts;
+    if (this.match) { this.match.points[al] += pts; this.match.tower[al] += pts; }
   }
 
   /**

@@ -13,7 +13,7 @@
 //  - Driving (every physics step): A* path on a 25 cm grid of the field, steering along it,
 //    keeping clear of other robots, and turning to aim when it shoots.
 import * as THREE from 'three';
-import { HALF_L, HALF_W, BLUE, RED, HUB, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, fieldToWorld } from './constants.js';
+import { HALF_L, HALF_W, BLUE, RED, HUB, ALLIANCE_ZONE_DEPTH, STATIONS, GROUP, groups, fieldToWorld, OUTPOST, TOWER } from './constants.js';
 import { FUEL_RADIUS, hubCenter } from './fuel.js';
 
 const G = 9.81;
@@ -23,12 +23,35 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 
-export const AI_LEVELS = {
-  // aim = degrees of spread per shot; with the speed noise that's roughly 45% / 65% / 85% in
-  Rookie: { react: 0.6, aim: 7, speed: 0.7, fire: 3, think: 0.4, mistakes: 0.25, profile: false },
-  District: { react: 0.3, aim: 4.5, speed: 0.85, fire: 4.5, think: 0.25, mistakes: 0.1, profile: false },
-  Champs: { react: 0.12, aim: 2.6, speed: 1, fire: 6, think: 0.15, mistakes: 0.03, profile: true },
-};
+// Skill levels, weakest to strongest. A robot's skill can sit between two of them.
+// aim = degrees of spread per shot, fire = shots a second, intake = how fast it swallows FUEL.
+// Calibrated to real 2026 alliance scores (3 robots, 2:40): Easy ~ 120, Medium ~ 250,
+// Hard ~ 370, Challenging ~ 550 (see REAL_EVENTS below).
+const LEVELS = [
+  { name: 'Easy', react: 0.6, aim: 8, speed: 0.65, fire: 1.3, intake: 0.5, think: 0.45, mistakes: 0.3 },
+  { name: 'Medium', react: 0.35, aim: 5.5, speed: 0.78, fire: 1.9, intake: 0.7, think: 0.3, mistakes: 0.15 },
+  { name: 'Hard', react: 0.2, aim: 3.6, speed: 0.95, fire: 3.4, intake: 1.15, think: 0.2, mistakes: 0.07 },
+  { name: 'Challenging', react: 0.1, aim: 2.2, speed: 1.1, fire: 6.5, intake: 2.0, think: 0.1, mistakes: 0.02 },
+];
+export const AI_LEVEL_NAMES = [...LEVELS.map((l) => l.name), 'Realistic', 'Adaptive'];
+/** A skill between the levels: t = 0 (Easy) .. 3 (Challenging). */
+function levelAt(t) {
+  t = clamp(t, 0, 3);
+  const i = Math.min(2, Math.floor(t)), f = t - i, A = LEVELS[i], B = LEVELS[i + 1];
+  const out = { t };
+  for (const k of ['react', 'aim', 'speed', 'fire', 'intake', 'think', 'mistakes']) out[k] = A[k] + (B[k] - A[k]) * f;
+  return out;
+}
+// Realistic: 201's 2026 season from FIRST's match results (alliance scores, quals). Each match
+// is set at one of these events' level, and the robots in it are spread around that level the
+// way real alliances mix strong and weak robots.
+export const REAL_EVENTS = [
+  { name: 'FIM Midland (week 2)', t: 0.55, spread: 0.6, typical: '50-280, most 80-170' },
+  { name: 'FIM Troy (week 4)', t: 1.45, spread: 0.75, typical: '120-570, most 200-300' },
+  { name: 'Michigan State Champs', t: 2.15, spread: 0.6, typical: '250-570, most 270-420' },
+  { name: 'FIRST Championship (Milstein)', t: 2.55, spread: 0.55, typical: '140-660, most 380-500' },
+];
+
 
 const TYPES = {
   Shooter: { cap: 40, fire: 1.2, range: [2.4, 4.4], speed: 4.3, intake: 8, aggression: 0.15, mass: 60 },
@@ -38,6 +61,10 @@ const TYPES = {
 };
 const TYPE_NAMES = Object.keys(TYPES);
 const STRATEGIES = ['race', 'deny', 'hoard', 'balanced'];
+// TOWER: LEVEL 1 / 2 / 3 in TELEOP (points per robot), how long the climb takes, how high it hangs
+const CLIMB_PTS = [0, 10, 20, 30];
+const CLIMB_TIME = [0, 2.5, 4.5, 6.5];
+const CLIMB_Y = [0, 0.18, 0.5, 0.85];
 
 // ------------------------------------------------------------ across-match memory
 const MEM_KEY = '201sim.aiMemory.v1';
@@ -265,6 +292,7 @@ class Bot {
 
   sync(alpha) {
     this.root.position.lerpVectors(this.prev, this.cur, alpha);
+    this.root.position.y += this.climbY || 0;
     this.root.rotation.y = this.prevYaw + wrap(this.curYaw - this.prevYaw) * alpha;
     this.fuelVis.count = Math.min(12, Math.ceil(this.load / Math.max(1, this.type.cap / 12)));
   }
@@ -301,16 +329,21 @@ export class AIPlayers {
     let r = seed ? Number(seed) || [...String(seed)].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) : Math.floor(Math.random() * 1e9);
     this.seed = r;
     const rand = () => { r = (r * 1103515245 + 12345) % 2147483648; return r / 2147483648; };
-    let lv = AI_LEVELS[level] || AI_LEVELS.District;
-    if (level === 'Adaptive') {
-      // 0 = Rookie .. 2 = Champs, moved after every match toward close games
-      const t = clamp(this.mem.level ?? 1, 0, 2);
-      const A = AI_LEVELS.Rookie, B = AI_LEVELS.District, C = AI_LEVELS.Champs;
-      const mix = (k) => (t < 1 ? A[k] + (B[k] - A[k]) * t : B[k] + (C[k] - B[k]) * (t - 1));
-      lv = { react: mix('react'), aim: mix('aim'), speed: mix('speed'), fire: mix('fire'), think: mix('think'), mistakes: mix('mistakes'), profile: t > 1.4 };
+    // the skill every robot is built around, and how far each one strays from it
+    let base, spread = 0.25;
+    this.event = null;
+    if (level === 'Realistic') {
+      this.event = REAL_EVENTS[Math.floor(rand() * REAL_EVENTS.length)];
+      base = this.event.t; spread = this.event.spread;
+    } else if (level === 'Adaptive') {
+      base = clamp(this.mem.level ?? 1, 0, 3); // moved after every match toward close games
+    } else {
+      base = Math.max(0, LEVELS.findIndex((l) => l.name === level));
+      if (base === 0 && level !== 'Easy') base = 1;
     }
     this.levelName = level;
-    this.lv = lv;
+    this.base = base;
+    const gaussR = () => { let u = rand() || 1e-6, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
     const used = new Set([201]);
     const team = () => { let n; do n = 100 + Math.floor(rand() * 11400); while (used.has(n)); used.add(n); return n; };
     const add = (al, slot) => {
@@ -324,8 +357,12 @@ export class AIPlayers {
         range: TYPES[typeName].range[0] + rand() * (TYPES[typeName].range[1] - TYPES[typeName].range[0]),
         jitter: 0.15 + rand() * 0.25,
       };
+      const lv = levelAt(base + gaussR() * spread);
       const b = new Bot(this.scene, this.RAPIER, this.world, al, team(), typeName, lv, pers);
       b.slot = slot;
+      // climbers go for the top rung (if skilled enough); a few other robots can do LEVEL 1
+      const skill = lv.t > 2.2 ? 2 : lv.t < 0.8 ? 0 : 1;
+      b.climbLevel = typeName === 'Climber' ? 1 + Math.min(2, skill + (rand() < 0.4 ? 1 : 0)) : rand() < 0.3 ? 1 : 0;
       this.bots.push(b);
     };
     // your teammates take the other driver stations; the opponents line up across the field
@@ -354,6 +391,7 @@ export class AIPlayers {
       const p2 = fieldToWorld(ALLIANCE_ZONE_DEPTH - 0.6, STATIONS[b.slot].fy, b.alliance);
       b.reset(p2.x, p2.z, Math.atan2(-(p2.z - p.z), p2.x - p.x));
       b.load = 8; b.scored = 0; b.shots = 0; b.fireT = 0;
+      b.climbY = 0; b.towerPts = 0; b.pinT = 0; b.fouls = 0;
       b.thinkT = Math.random() * 0.3;
     }
     for (const al of [BLUE, RED]) if (this.coach?.[al]) this.coach[al].t = 0;
@@ -412,15 +450,43 @@ export class AIPlayers {
     this.watchYou(robot, game, dt);
     const disabled = match?.disabled;
     for (const al of [BLUE, RED]) this.coachThink(al, ctx, game, dt);
+    this.referee(robot, game, dt);
     for (const b of this.bots) {
       if (disabled) { b.drive(0, 0, 0, dt); continue; }
-      this.collect(b);
+      this.collect(b, dt);
       b.thinkT -= dt;
       if (b.thinkT <= 0) {
-        b.thinkT = this.lv.think * (0.8 + Math.random() * 0.4);
+        b.thinkT = b.level.think * (0.8 + Math.random() * 0.4);
         this.think(b, ctx, game);
       }
       this.act(b, ctx, game, dt);
+    }
+  }
+
+  /**
+   * Pinning: an opposing AI robot holding you (or anyone) in place for more than 3 s is a foul,
+   * and it has to back off.
+   */
+  referee(robot, game, dt) {
+    if (game.match?.disabled) return;
+    const rp = robot.body.translation();
+    const rv = robot.body.linvel();
+    const movers = [{ p: rp, v: rv, al: this.alliance, r: robot.halfL }, ...this.bots.map((o) => ({ p: o.pos(), v: o.body.linvel(), al: o.alliance, r: o.halfL, bot: o }))];
+    for (const b of this.bots) {
+      const p = b.pos();
+      let pinning = false;
+      for (const m of movers) {
+        if (m.bot === b || m.al === b.alliance) continue;
+        const d = Math.hypot(m.p.x - p.x, m.p.z - p.z);
+        if (d < b.halfL + m.r + 0.12 && Math.hypot(m.v.x, m.v.z) < 0.35 && b.task.kind === 'defend') pinning = true;
+      }
+      b.pinT = pinning ? (b.pinT || 0) + dt : Math.max(0, (b.pinT || 0) - dt);
+      if (b.pinT > 3) {
+        b.pinT = 0;
+        b.fouls = (b.fouls || 0) + 1;
+        game.foulBy(b.alliance, b.team, 'MINOR', 'G420', 'pinning for more than 3 seconds');
+        b.task = { kind: 'unstick', t: 0, dir: { x: Math.random() - 0.5, z: Math.random() - 0.5 }, until: 1.2 };
+      }
     }
   }
 
@@ -460,9 +526,11 @@ export class AIPlayers {
 
   // ---------------------------------------------------------- brain: pick a task
   think(b, ctx, game) {
+    // once on the TOWER, it stays there
+    if (b.task.kind === 'climb' && b.task.phase !== 'go') return;
     const p = b.pos();
     const al = b.alliance;
-    const lv = this.lv;
+    const lv = b.level;
     const strat = this.coach[al].strat;
     const full = b.load / b.type.cap;
     const active = ctx.active(al);
@@ -486,6 +554,19 @@ export class AIPlayers {
     }
     // defend: the coach's call, weighed by personality
     if (b.role === 'defend' && b.guard) options.push({ kind: 'defend', u: 0.7 + b.p.aggression * 0.6 - full * 0.3 });
+    // feed the OUTPOST: hand FUEL to our human player while our HUB is off (feeders love this)
+    if (b.load >= 10 && !active) {
+      let u = full * 0.75 + (b.typeName === 'Feeder' ? 0.4 : 0) + (strat === 'hoard' ? 0.1 : 0) - b.p.patience * 0.2;
+      if (game.humans[al].stash > 20) u -= 0.5;
+      options.push({ kind: 'feed', u });
+    }
+    // climb: in END GAME, with enough time to get there and get up
+    if (b.climbLevel && ctx.endgame) {
+      const tw = this.towerSpot(b);
+      const travel = Math.hypot(p.x - tw.x, p.z - tw.z) / b.type.speed + 1.5;
+      const need = travel + CLIMB_TIME[b.climbLevel] + 2;
+      if (ctx.timeLeft < need + 6) options.push({ kind: 'climb', u: ctx.timeLeft < need ? 3 : 1.4 });
+    }
     // a little randomness between close calls, more for less patient personalities
     for (const o of options) o.u += (Math.random() - 0.5) * b.p.jitter;
     // stick with the current task a bit, so it doesn't flip-flop
@@ -520,6 +601,15 @@ export class AIPlayers {
       this.plan(b, spot.x, spot.z);
     } else if (kind === 'defend') {
       b.task.replan = 0;
+    } else if (kind === 'feed') {
+      const o = fieldToWorld(OUTPOST.depth + 0.55, OUTPOST.fy + 0.1, al);
+      b.task.spot = o;
+      this.plan(b, o.x, o.z);
+    } else if (kind === 'climb') {
+      const tw = this.towerSpot(b);
+      b.task.spot = tw;
+      b.task.phase = 'go';
+      this.plan(b, tw.x, tw.z);
     } else if (kind === 'unstick') {
       const a = Math.random() * Math.PI * 2;
       b.task.dir = { x: Math.cos(a), z: Math.sin(a) };
@@ -528,6 +618,13 @@ export class AIPlayers {
       b.stuckT = 0;
     }
     void p;
+  }
+
+  /** Where to line up on our TOWER (two robots can climb side by side). */
+  towerSpot(b) {
+    const mates = this.bots.filter((o) => o.alliance === b.alliance && o.climbLevel);
+    const i = Math.max(0, mates.indexOf(b));
+    return fieldToWorld(TOWER.depth + 0.5, TOWER.fy + (i % 2 ? 0.5 : -0.5), b.alliance);
   }
 
   /** Choose a FUEL to go get: close, in a cluster, on our favorite side, not chased by a teammate. */
@@ -621,6 +718,36 @@ export class AIPlayers {
         if (t.replan <= 0) { t.replan = 0.6; this.plan(b, tx, tz); }
         if (b.path && Math.hypot(tx - p.x, tz - p.z) < 1.5) b.path = null;
       }
+    } else if (t.kind === 'feed' && t.spot) {
+      arrive = true;
+      const d = Math.hypot(p.x - t.spot.x, p.z - t.spot.z);
+      if (d < 0.8) {
+        // tip the hopper into the OUTPOST
+        t.dump = (t.dump || 0) + dt * 12;
+        while (t.dump >= 1 && b.load > 0) { t.dump -= 1; b.load--; game.feedHuman(b.alliance, 1); }
+        if (b.load <= 0) b.thinkT = 0, b.task = { kind: 'idle' };
+      }
+    } else if (t.kind === 'climb' && t.spot) {
+      const d = Math.hypot(p.x - t.spot.x, p.z - t.spot.z);
+      const face = b.alliance === BLUE ? Math.PI : 0; // back up to the TOWER
+      if (t.phase === 'go') {
+        arrive = true;
+        if (d < 0.25) { t.phase = 'up'; t.climbT = 0; b.path = null; }
+      }
+      if (t.phase !== 'go') {
+        b.drive(0, 0, clamp(wrap(face - b.yaw()) * 5, -4, 4), dt);
+        if (t.phase === 'up') {
+          t.climbT += dt;
+          const dur = CLIMB_TIME[b.climbLevel];
+          b.climbY = CLIMB_Y[b.climbLevel] * Math.min(1, t.climbT / dur);
+          if (t.climbT >= dur) {
+            // the odd slip: drop back down and try for a lower rung
+            if (Math.random() < b.level.mistakes * 0.6 && b.climbLevel > 1) { b.climbLevel--; t.climbT = 0; b.climbY = 0; }
+            else { t.phase = 'hang'; game.addTower(b.alliance, CLIMB_PTS[b.climbLevel]); b.towerPts = CLIMB_PTS[b.climbLevel]; }
+          }
+        }
+        return;
+      }
     } else if (t.kind === 'unstick') {
       b.drive(t.dir.x * 2, t.dir.z * 2, 0, dt);
       t.until -= dt;
@@ -654,7 +781,7 @@ export class AIPlayers {
       }
     }
     // reaction delay: the command catches up over the level's reaction time
-    const kr = 1 - Math.exp(-dt / Math.max(0.05, this.lv.react * 0.5));
+    const kr = 1 - Math.exp(-dt / Math.max(0.05, b.level.react * 0.5));
     b.cmdX = (b.cmdX ?? 0) + (vx - (b.cmdX ?? 0)) * kr;
     b.cmdZ = (b.cmdZ ?? 0) + (vz - (b.cmdZ ?? 0)) * kr;
     let om = 0;
@@ -669,8 +796,11 @@ export class AIPlayers {
   }
 
   /** FUEL that reaches the intake goes in the hopper. */
-  collect(b) {
+  collect(b, dt) {
     if (b.load >= b.type.cap) return;
+    // the intake can only swallow so many a second
+    b.intakeBudget = Math.min(2, (b.intakeBudget || 0) + dt * b.type.intake * b.level.intake);
+    if (b.intakeBudget < 1) return;
     const p = b.pos();
     const y = b.yaw(), c = Math.cos(y), s = Math.sin(y);
     // only look at nearby balls: cheap check first
@@ -683,6 +813,8 @@ export class AIPlayers {
       if (lx > b.halfL - 0.08 && lx < b.halfL + 0.22 && Math.abs(lz) < 0.36) {
         this.fuel.disable(ball);
         b.load++;
+        b.intakeBudget -= 1;
+        if (b.intakeBudget < 1) return;
         if (b.load >= b.type.cap) return;
       }
     }
@@ -698,7 +830,7 @@ export class AIPlayers {
     if (Math.abs(wrap(want - b.yaw())) > 8 * deg) return;
     const ball = this.fuel.takeSpare();
     if (!ball) return;
-    b.fireT = 1 / (this.lv.fire * b.type.fire * (0.85 + Math.random() * 0.3));
+    b.fireT = 1 / (b.level.fire * b.type.fire * (0.85 + Math.random() * 0.3));
     b.load--;
     b.shots++;
     const ex = p.x + Math.cos(b.yaw()) * -0.15, ez = p.z - Math.sin(b.yaw()) * -0.15, ey = 0.62;
@@ -709,9 +841,9 @@ export class AIPlayers {
     const den = 2 * Math.cos(th) ** 2 * (d * Math.tan(th) - h);
     if (den <= 0) return;
     let v = Math.sqrt((G * d * d) / den);
-    const err = this.lv.aim * deg;
+    const err = b.level.aim * deg;
     const yawN = gauss() * err;
-    v *= 1 + gauss() * (0.02 + this.lv.aim * 0.006);
+    v *= 1 + gauss() * (0.02 + b.level.aim * 0.006);
     const cy = Math.cos(yawN), sy = Math.sin(yawN);
     const ux = (dx / d) * cy - (dz / d) * sy, uz = (dx / d) * sy + (dz / d) * cy;
     const thN = th + gauss() * err * 0.6;
@@ -739,7 +871,7 @@ export class AIPlayers {
     for (const s of STRATEGIES) { this.mem.strat[s].a = 1 + (this.mem.strat[s].a - 1) * 0.9; this.mem.strat[s].b = 1 + (this.mem.strat[s].b - 1) * 0.9; }
     // Adaptive difficulty: toward close matches
     const margin = yours - theirs;
-    this.mem.level = clamp((this.mem.level ?? 1) + clamp(margin / 40, -0.5, 0.5), 0, 2);
+    this.mem.level = clamp((this.mem.level ?? 1) + clamp(margin / 60, -0.5, 0.5), 0, 3);
     const y = this.you;
     const side = y.sideT[1] - y.sideT[0];
     this.mem.you.side = this.mem.you.side * 0.7 + Math.sign(side) * 0.3;

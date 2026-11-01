@@ -61,7 +61,8 @@ try { settings.preload = localStorage.getItem('201sim.preload') !== 'off'; } cat
 try { settings.spawn = localStorage.getItem('201sim.spawn') || 'station'; } catch { settings.spawn = 'station'; }
 // Play vs AI: robots per alliance ("off", or "1v1".."3v3") and the AI's skill
 try { settings.vs = localStorage.getItem('201sim.vs') || 'off'; } catch { settings.vs = 'off'; }
-try { settings.aiLevel = localStorage.getItem('201sim.aiLevel') || 'District'; } catch { settings.aiLevel = 'District'; }
+try { settings.aiLevel = localStorage.getItem('201sim.aiLevel') || 'Medium'; } catch { settings.aiLevel = 'Medium'; }
+settings.aiLevel = { Rookie: 'Easy', District: 'Medium', Champs: 'Hard' }[settings.aiLevel] ?? settings.aiLevel;
 
 async function init() {
   await RAPIER.init();
@@ -156,7 +157,7 @@ async function init() {
   game.match = match;
   const ai = new AIPlayers(scene, RAPIER, world, fuel);
   game.onScored = (b, al, counted) => {
-    if (counted && !b.bot && al === settings.alliance) game.myScored = (game.myScored || 0) + 1;
+    if (counted && !b.bot && b.human == null && al === settings.alliance) game.myScored = (game.myScored || 0) + 1;
     ai.credit(b, counted);
   };
   // set up the AI robots for a new match (the field map is built the first time)
@@ -165,6 +166,7 @@ async function init() {
     if (!ai.nav) ai.buildNav(robot.body);
     const [mine, theirs] = settings.vs.split('v').map(Number);
     ai.setup({ alliance: settings.alliance, station: settings.station, mine, theirs, level: settings.aiLevel });
+    if (ai.event) setTimeout(() => toast(`Realistic: a ${ai.event.name} level match`, 'info', 4), 300);
   };
   const input = new Input();
 
@@ -589,25 +591,30 @@ async function init() {
     const fouls = game.fouls.reduce((a, f) => a + f.pts, 0);
     const side = (al) => {
       const total = match.points[al];
-      const pen = al === opp ? fouls : 0;
+      const pen = (al === opp ? fouls : 0) + (game.aiFouls || []).filter((f) => f.al !== al).reduce((a, f) => a + f.pts, 0);
       const auto = match.autoFuel[al];
-      return { total, auto, tele: Math.max(0, total - auto - pen), pen, fuel: total - pen };
+      const tower = match.tower?.[al] || 0;
+      return { total, auto, tele: Math.max(0, total - auto - pen - tower), pen, tower, fuel: total - pen - tower };
     };
     const S = { [BLUE]: side(BLUE), [RED]: side(RED) };
     const won = S[BLUE].total > S[RED].total ? BLUE : S[RED].total > S[BLUE].total ? RED : null;
     const rp = (al) => {
       const res = won === al ? 3 : won === null ? 1 : 0;
-      return [S[al].fuel >= 100 && 'fuel', S[al].fuel >= 360 && 'super', false, res >= 1, res >= 2, res >= 3];
+      return [S[al].fuel >= 100 && 'fuel', S[al].fuel >= 360 && 'super', S[al].tower >= 50, res >= 1, res >= 2, res >= 3];
     };
     const icons = (al) => {
       const got = rp(al);
       return ['fuel', 'super', 'tower', 'win', 'win', 'win'].map((k, i) => `<span class="${got[i] ? 'got' : ''}">${RP_ICONS[k]}</span>`).join('');
     };
     const teams = (al) => {
-      const bots = ai.teams[al].map(String);
-      const nums = (al === mine ? ['201', ...bots] : bots).concat(['', '', '']).slice(0, 3);
+      // each robot: team number and the points it scored itself
+      const rows = ai.bots.filter((b) => b.alliance === al).map((b) => ({ n: String(b.team), pts: b.scored + (b.towerPts || 0), note: b.typeName }));
+      if (al === mine) rows.unshift({ n: '201', pts: game.myScored || 0, note: 'you' });
+      while (rows.length < 3) rows.push(null);
       const rpTotal = rp(al).filter(Boolean).length;
-      return nums.map((n) => `<div class="fr-team ${n ? '' : 'empty'}"><span>${n || '----'}</span><b>${n ? rpTotal : ''}</b></div>`).join('');
+      return rows.slice(0, 3).map((r) => (r
+        ? `<div class="fr-team"><span>${r.n}<small>${r.pts} pts · ${r.note}</small></span><b>${rpTotal}</b></div>`
+        : '<div class="fr-team empty"><span>----</span><b></b></div>')).join('');
     };
     const winner = (al) => won === al ? '<div class="fr-winner">' + RP_ICONS.win + 'WINNER</div>'
       : won === null ? '<div class="fr-winner tie">TIE</div>' : '<div class="fr-winner none"></div>';
@@ -621,7 +628,7 @@ async function init() {
         <div class="fr-scores"><div class="blue"><small>BLUE</small>${S[BLUE].total}</div><div class="red"><small>RED</small>${S[RED].total}</div></div>
         <div class="fr-table">
           <div class="fr-head">AUTO</div>${row('FUEL', 'auto')}<div class="fr-row"><b>0</b><span>TOWER</span><b>0</b></div>
-          <div class="fr-head">TELEOP</div>${row('FUEL', 'tele', 'lite')}<div class="fr-row lite"><b>0</b><span>TOWER</span><b>0</b></div>${row('PENALTY', 'pen', 'lite')}
+          <div class="fr-head">TELEOP</div>${row('FUEL', 'tele', 'lite')}${row('TOWER', 'tower', 'lite')}${row('PENALTY', 'pen', 'lite')}
         </div>
         <div class="fr-stats">201: <b>${game.shots}</b> FUEL shot · <b>${acc}%</b> went in · <b>${game.missedInactive}</b> in an inactive HUB · fouls: <b>${game.fouls.length ? game.fouls.map((f) => `${f.kind} ${f.rule}`).join(', ') : 'none'}</b></div>
       </div>

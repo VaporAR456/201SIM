@@ -28,6 +28,7 @@ export class Match {
     this.over = false;
     this.autoFuel = { [BLUE]: 0, [RED]: 0 };
     this.points = { [BLUE]: 0, [RED]: 0 };
+    this.tower = { [BLUE]: 0, [RED]: 0 };
     this.firstInactive = null; // decided when AUTO ends
     this.lastActive = { [BLUE]: 0, [RED]: 0 };
     this.shots = 0;

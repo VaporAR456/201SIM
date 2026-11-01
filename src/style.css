@@ -205,3 +205,5 @@ th { color: var(--muted); font-weight: 600; }
 input[type=range].padfocus, input[type=checkbox].padfocus { outline-offset: 4px; }
 body:has(#pause:not([hidden])) #countdown { display: none; }
 .mm-opt[hidden] { display: none; }
+.fr-team span small { margin-left: .6em; font-size: .5em; opacity: .75; font-weight: 500; }
+.seg.wrap { flex-wrap: wrap; } .seg.wrap button { flex: 1 1 30%; }
