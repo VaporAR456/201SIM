@@ -180,7 +180,14 @@ export class Game {
       const omega = Math.max(-lim, Math.min(lim, 4.5 * err));
       turn = -omega / (cfg.maxOmega * this.robot.speedScale);
       turn = Math.max(-1, Math.min(1, turn));
-      this.aim.ready = Math.abs(err) < 4 * deg;
+      // Like passing: on the move you keep firing at nearly the normal rate and just miss more.
+      // The window opens with speed, and once firing it stays open unless you're way off. Shots go
+      // where the shooter actually points, so any heading error shows up as a miss.
+      const v = this.robot.body.linvel();
+      const moving = Math.hypot(v.x, v.z);
+      const win = (this.firing ? 15 : Math.min(12, 4 + 4 * moving)) * deg;
+      this.aim.ready = Math.abs(err) < win;
+      this.aim.err = err;
     }
 
     this.fireT -= dt;
@@ -189,6 +196,7 @@ export class Game {
       this.launch(this.aim);
       this.fireT = 1 / this.settings.fireRate;
     }
+    this.firing = !!(this.aim && this.aim.ready && this.held > 0);
 
     this.clock += dt;
     this.scoreCheck(dt);
@@ -490,7 +498,7 @@ export class Game {
     // scatter, and more so on the move.
     const moving = Math.hypot(v.x, v.z);
     const spread = (sh.spreadDeg + moving * 1.5) * deg;
-    const yawN = gauss() * spread;
+    const yawN = (aim.err ?? 0) + gauss() * spread;
     const thN = aim.th + gauss() * spread * 0.8;
     const spd = aim.spd * (1 + gauss() * (sh.speedNoise + moving * 0.01));
     const cy = Math.cos(yawN), sy = Math.sin(yawN);

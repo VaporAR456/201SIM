@@ -4,7 +4,7 @@ import { BLUE, GROUP, groups } from './constants.js';
 
 // Control feel multipliers. Baby mode: much softer, for drivers used to MoSim.
 export const FEEL_NORMAL = { speed: 1, accel: 1, turn: 1, expo: 1 };
-export const FEEL_BABY = { speed: 0.55, accel: 0.4, turn: 0.45, expo: 2.2 };
+export const FEEL_BABY = { speed: 0.8, accel: 0.7, turn: 0.72, expo: 1.5 };
 
 const tmp = new THREE.Vector3();
 

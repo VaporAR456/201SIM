@@ -81,6 +81,9 @@ export class Fuel {
 
   enable(b, x, y, z, vx, vy, vz) {
     if (b.held) this.setHeld(b, false);
+    // a ball reused from a reset can still be marked as in the robot; clear it so the hopper
+    // check sees it arrive and makes it held FUEL (the TRENCH arm skips held FUEL)
+    b.inRobot = false;
     b.active = true;
     b.body.setEnabled(true);
     b.body.setTranslation({ x, y, z }, true);

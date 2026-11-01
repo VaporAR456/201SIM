@@ -581,7 +581,7 @@ async function init() {
       camPos.set(p.x + cx * camDist, 2.6, p.z + cz * camDist);
       camLook.set(p.x - cx * 1.2, 0.3, p.z - cz * 1.2);
     } else {
-      camPos.set(p.x * 0.6 + allianceSign * 3, 13, p.z * 0.6);
+      camPos.set(p.x * 0.6 + allianceSign * 2.5, 10.2, p.z * 0.6); // under the light panels (10.8 m)
       camLook.set(p.x * 0.6, 0, p.z * 0.6);
     }
     // jump straight there when play starts, rather than sweeping in from the menu view
