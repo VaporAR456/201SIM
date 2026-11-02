@@ -85,7 +85,13 @@ const POOLS = {
   all: () => uniq([MIDLAND, TROY, STATES, MILSTEIN, TOP]),
 };
 /** Every team you can pick to play against, best first. */
-export const TEAM_LIST = POOLS.all().sort((a, b) => b.epa - a.epa);
+export const TEAM_LIST = POOLS.all().sort((a, b) => b.epa - a.epa).map((e) => ({
+  ...e,
+  events: [['top', TOP], ['mil', MILSTEIN], ['sta', STATES], ['try', TROY], ['mid', MIDLAND]].filter(([, l]) => l.some((r) => r[0] === e.team)).map(([k]) => k),
+}));
+// 201 played by the AI, from its 2026 season on Statbotics: EPA 163.7 (31 FUEL in AUTO, ~44 / 36
+// in its two active shifts, 46 in END GAME, never climbs). Double shooter at 8 FUEL/s, 40 FUEL hopper.
+export const FEDS = { team: 201, name: 'The FEDS', epa: 163.7, tower: 0, auto: 30.8, events: [] };
 // Realistic: 201's 2026 season from FIRST's match results (alliance scores, quals). Each match
 // is set at one of these events' level, and the robots in it are spread around that level the
 // way real alliances mix strong and weak robots.
@@ -245,6 +251,65 @@ function numberTexture(text, bg) {
   return t;
 }
 
+// What the teams' 2026 robots look like, roughly: frame / accent colors and the kind of shooter.
+// Team colors for the well-known teams; everyone else gets a look picked from their number, so a
+// team always looks the same.
+const LOOKS = {
+  4414: { frame: 0x1b2a3a, accent: 0x00a6b4, shooter: 'turret' },
+  254: { frame: 0x1d2d5c, accent: 0xf2b400, shooter: 'turret' },
+  1323: { frame: 0x1a1a1a, accent: 0xc8102e, shooter: 'wide' },
+  1690: { frame: 0x111111, accent: 0xe8e8e8, shooter: 'turret' },
+  1678: { frame: 0x2f6b2a, accent: 0xff8a1c, shooter: 'wide' },
+  33: { frame: 0x1a1a1a, accent: 0xf5c400, shooter: 'hood' },
+  118: { frame: 0x9aa3ad, accent: 0x1b3a8a, shooter: 'turret' },
+  201: { frame: 0x2a2f36, accent: 0x1f6fff, shooter: 'double' },
+};
+const SHOOTERS = ['hood', 'double', 'wide', 'turret'];
+const ACCENTS = [0xf5c400, 0x2e9e5b, 0xff8a1c, 0x7a3cc4, 0x14a0a8, 0xe8322f, 0x1f6fff, 0xd0d4da, 0xf080b0, 0x8bc34a];
+function lookFor(team) {
+  if (LOOKS[team]) return LOOKS[team];
+  const h = (team * 2654435761) >>> 0;
+  return { frame: [0x3a3f46, 0x5b6068, 0x2c2f33, 0x6b6f75, 0x1d1f22][h % 5], accent: ACCENTS[(h >>> 3) % ACCENTS.length], shooter: SHOOTERS[(h >>> 7) % SHOOTERS.length], tall: (h >>> 11) % 3 === 0 };
+}
+/** Frame, hopper, shooter and intake, as a few low-poly pieces. */
+function buildMech(team, hl, hw) {
+  const L = lookFor(team);
+  const g = new THREE.Group();
+  const frameM = new THREE.MeshStandardMaterial({ color: L.frame, metalness: 0.55, roughness: 0.45 });
+  const accM = new THREE.MeshStandardMaterial({ color: L.accent, metalness: 0.3, roughness: 0.5 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 });
+  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+  const cyl = (r, len, x, y, z, m, axis = 'z') => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), m); if (axis === 'z') o.rotation.x = Math.PI / 2; if (axis === 'x') o.rotation.z = Math.PI / 2; o.position.set(x, y, z); g.add(o); return o; };
+  box(hl * 2 - 0.12, 0.08, hw * 2 - 0.12, 0, 0.2, 0, frameM);
+  const hopH = L.tall ? 0.34 : 0.26;
+  const hop = box(0.55, hopH, 0.64, 0.05, 0.24 + hopH / 2, 0, new THREE.MeshStandardMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.28, roughness: 0.1 }));
+  hop.castShadow = false;
+  // hopper corner posts in the team color
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.03, hopH, 0.03, 0.05 + sx * 0.27, 0.24 + hopH / 2, sz * 0.31, accM);
+  if (L.shooter === 'turret') {
+    box(0.22, 0.12, 0.3, -0.26, 0.36, 0, frameM);
+    const t = cyl(0.17, 0.08, -0.26, 0.47, 0, accM, 'y');
+    void t;
+    box(0.3, 0.12, 0.2, -0.22, 0.57, 0, dark).rotation.z = 0.35;
+    cyl(0.07, 0.22, -0.16, 0.6, 0, accM);
+  } else if (L.shooter === 'double') {
+    box(0.2, 0.34, 0.6, -0.28, 0.41, 0, frameM);
+    for (const z of [-0.14, 0.14]) { cyl(0.08, 0.2, -0.2, 0.56, z, dark); box(0.12, 0.03, 0.2, -0.27, 0.62, z, accM); }
+  } else if (L.shooter === 'wide') {
+    box(0.22, 0.32, 0.72, -0.27, 0.4, 0, frameM);
+    cyl(0.085, 0.7, -0.2, 0.56, 0, dark);
+    box(0.2, 0.03, 0.72, -0.27, 0.63, 0, accM).rotation.z = -0.3;
+  } else {
+    box(0.2, 0.34, 0.5, -0.28, 0.41, 0, frameM);
+    cyl(0.09, 0.46, -0.2, 0.55, 0, dark);
+    box(0.16, 0.03, 0.46, -0.3, 0.63, 0, accM).rotation.z = -0.4;
+  }
+  // over-the-bumper intake in the team color, with a roller
+  box(0.1, 0.06, 0.72, hl + 0.06, 0.12, 0, accM);
+  cyl(0.035, 0.72, hl + 0.1, 0.09, 0, dark);
+  return g;
+}
+
 class Bot {
   constructor(scene, RAPIER, world, alliance, team, typeName, level, pers) {
     this.alliance = alliance;
@@ -280,17 +345,9 @@ class Bot {
     const geo = new THREE.BoxGeometry(this.halfL * 2, 0.13, this.halfW * 2);
     const bm = new THREE.Mesh(geo, [num, num, bump, bump, num, num]);
     bm.position.y = 0.1; bm.castShadow = true; g.add(bm);
-    const metal = new THREE.MeshStandardMaterial({ color: [0x3a3f46, 0x5b6068, 0x2c2f33, 0x6b6f75][team % 4], metalness: 0.6, roughness: 0.45 });
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(this.halfL * 2 - 0.12, 0.08, this.halfW * 2 - 0.12), metal);
-    frame.position.y = 0.2; g.add(frame);
-    const hop = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.26, 0.62), new THREE.MeshStandardMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.28, roughness: 0.1 }));
-    hop.position.set(0.05, 0.37, 0); g.add(hop);
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.34, 0.5), metal);
-    tower.position.set(-0.28, 0.41, 0); tower.castShadow = true; g.add(tower);
-    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.46, 12), new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 }));
-    hood.rotation.x = Math.PI / 2; hood.position.set(-0.2, 0.55, 0); g.add(hood);
-    const intake = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.7), new THREE.MeshStandardMaterial({ color: 0x2b8a3e, roughness: 0.7 }));
-    intake.position.set(this.halfL + 0.04, 0.08, 0); g.add(intake);
+    // the rest of the robot: a low-poly take on the team's real robot (their colors and shooter style)
+    this.mech = buildMech(team, this.halfL, this.halfW);
+    g.add(this.mech);
     // FUEL you can see in the hopper
     this.fuelVis = new THREE.InstancedMesh(new THREE.SphereGeometry(FUEL_RADIUS, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffd21f, roughness: 0.75 }), 12);
     this.fuelVis.count = 0; g.add(this.fuelVis);
@@ -410,7 +467,7 @@ export class AIPlayers {
       return r < 0.2 ? 'Feeder' : r < 0.3 ? 'Defender' : 'Shooter';
     };
     const add = (al, slot, e) => {
-      const elite = ELITE[e.team];
+      const elite = ELITE[e.team] || (e.team === 201 ? { bps: 8, onMove: true } : null);
       const typeName = elite ? 'Shooter' : typeFor(e);
       const pers = {
         aggression: clamp(TYPES[typeName].aggression + (rand() - 0.5) * 0.5, 0, 1),
@@ -442,7 +499,8 @@ export class AIPlayers {
       b.climbLevel = e.tower > 20 ? 3 : e.tower > 9 ? 2 : e.tower > 1.5 ? 1 : 0;
       if (typeName === 'Climber' && !b.climbLevel) b.climbLevel = 1;
       this.bots.push(b);
-      if (elite) this.elites.push(b);
+      if (elite && e.team !== 201) this.elites.push(b);
+      if (e.team === 201) { b.climbLevel = 0; b.cap = 40; b.is201 = true; this.use201Model?.(b); }
     };
     // your teammates take the other driver stations; the opponents line up across the field
     const free = [0, 1, 2].filter((s) => s !== station);
@@ -457,7 +515,7 @@ export class AIPlayers {
     }
     // teams you picked yourself take their slots first
     for (let i = 0; i < theirs; i++) {
-      const pk = picks[i] ? TEAM_LIST.find((e) => e.team === picks[i]) : null;
+      const pk = picks[i] === 201 ? FEDS : picks[i] ? TEAM_LIST.find((e) => e.team === picks[i]) : null;
       add(other(alliance), i, pk || elites.shift() || draw());
     }
     // each alliance's coach picks a strategy: the opponents learn which ones beat you

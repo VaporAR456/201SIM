@@ -208,10 +208,16 @@ body:has(#pause:not([hidden])) #countdown { display: none; }
 .fr-team span small { margin-left: .6em; font-size: .5em; opacity: .75; font-weight: 500; }
 .seg.wrap { flex-wrap: wrap; } .seg.wrap button { flex: 1 1 30%; }
 
-.pick-row { display: grid; grid-template-columns: 6.5em 1fr 15em; align-items: center; gap: 0.6em; margin: 0.35em 0; font-size: 0.9em; }
-.pick-row b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pick-row input { width: 100%; }
-@media (max-width: 700px) { .pick-row { grid-template-columns: 1fr; } }
+#team-picker { z-index: 4; max-height: 92vh; display: flex; flex-direction: column; }
+#team-picker[hidden] { display: none; }
+#tp-search { margin: 10px 0; padding: 10px 12px; border-radius: 8px; border: 1px solid #3a4550; background: #12161b; color: #fff; font-size: 15px; }
+#tp-list { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; padding: 4px; min-height: 0; }
+.tp-team { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; border-radius: 10px; }
+.tp-team b { font-size: 22px; line-height: 1; }
+.tp-team span { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tp-team small { font-size: 11px; color: var(--muted); }
+.tp-team.on { border-color: var(--accent); }
+.tp-team.us { border-color: #1f6fff; }
 
 /* ---------------------------------------------------------- phones and tablets */
 #touch { position: fixed; inset: 0; z-index: 2; pointer-events: none; user-select: none; -webkit-user-select: none; touch-action: none; }

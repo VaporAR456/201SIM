@@ -167,6 +167,13 @@ async function init() {
     ai.credit(b, counted);
   };
   // set up the AI robots for a new match (the field map is built the first time)
+  // an AI 201 wears 201's real CAD model
+  ai.use201Model = (b) => {
+    if (!robot.cadModel) return;
+    const m = robot.cadModel.clone(true);
+    b.mech.visible = false;
+    b.root.add(m);
+  };
   const setupAi = () => {
     if (settings.vs === 'off') { ai.clear(); return; }
     if (!ai.nav) ai.buildNav(robot.body);
@@ -248,30 +255,59 @@ async function init() {
     try { localStorage.setItem('201sim.aiLevel', settings.aiLevel); } catch { /* not saved */ }
     refreshMenu();
   }));
-  // pick the teams you play against: a slider per opponent (works with the controller's left /
-  // right), Random at the far left, then every team from best to worst
+  // pick the teams you play against: a button per opponent opens a team picker screen
+  // (filter by event, search, or tap a team; works with the controller too)
   try { settings.picks = JSON.parse(localStorage.getItem('201sim.picks')) || []; } catch { settings.picks = []; }
   const pickBox = document.getElementById('pick-teams');
-  const teamLabel = (n) => { const e = TEAM_LIST.find((t) => t.team === n); return e ? `${e.team} ${e.name} · EPA ${Math.round(e.epa)}` : 'Random team'; };
+  const picker = document.getElementById('team-picker');
+  const tpList = document.getElementById('tp-list'), tpSearch = document.getElementById('tp-search');
+  const findTeam = (n) => TEAM_LIST.find((t) => t.team === n);
+  const teamLabel = (n) => { if (n === 201) return '201 The FEDS (AI)'; const e = findTeam(n); return e ? `${e.team} ${e.name}` : 'Random team'; };
+  let pickSlot = 0, pickFilter = 'all';
+  const savePicks = () => { try { localStorage.setItem('201sim.picks', JSON.stringify(settings.picks)); } catch { /* not saved */ } };
   const renderPicks = () => {
     const theirs = settings.vs === 'off' ? 0 : +settings.vs.split('v')[1];
-    pickBox.innerHTML = '';
+    pickBox.innerHTML = theirs ? '<span class="label">Opponents</span><div class="seg wrap pick-slots"></div>' : '';
+    const row = pickBox.querySelector('.pick-slots');
     for (let i = 0; i < theirs; i++) {
-      const row = document.createElement('label');
-      row.className = 'pick-row';
-      const cur = settings.picks[i] || 0;
-      const idx = cur ? TEAM_LIST.findIndex((t) => t.team === cur) + 1 : 0;
-      row.innerHTML = `<span>Opponent ${i + 1}</span><input type="range" min="0" max="${TEAM_LIST.length}" step="1" value="${idx}"><b>${teamLabel(cur)}</b>`;
-      const sl = row.querySelector('input'), lab = row.querySelector('b');
-      sl.addEventListener('input', () => {
-        const v = +sl.value;
-        settings.picks[i] = v ? TEAM_LIST[v - 1].team : 0;
-        lab.textContent = teamLabel(settings.picks[i]);
-        try { localStorage.setItem('201sim.picks', JSON.stringify(settings.picks)); } catch { /* not saved */ }
-      });
-      pickBox.appendChild(row);
+      const b = document.createElement('button');
+      b.textContent = teamLabel(settings.picks[i]);
+      b.addEventListener('click', () => openPicker(i));
+      row.appendChild(b);
     }
   };
+  const FILTERS = [['all', 'All teams'], ['top', 'World top 20'], ['mil', 'Champs (Milstein)'], ['sta', 'MI States'], ['try', 'Troy'], ['mid', 'Midland']];
+  const tpFilters = document.getElementById('tp-filters');
+  tpFilters.innerHTML = FILTERS.map(([k, l]) => `<button data-tpf="${k}">${l}</button>`).join('');
+  tpFilters.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { pickFilter = b.dataset.tpf; renderTeamList(); }));
+  const renderTeamList = () => {
+    tpFilters.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.tpf === pickFilter));
+    const q = tpSearch.value.trim().toLowerCase();
+    const list = TEAM_LIST.filter((t) => (pickFilter === 'all' || t.events.includes(pickFilter)) && (!q || String(t.team).startsWith(q) || t.name.toLowerCase().includes(q)));
+    const cur = settings.picks[pickSlot] || 0;
+    const card = (n, name, sub, extra = '') => `<button class="tp-team${n === cur ? ' on' : ''}${extra}" data-team="${n}"><b>${n || '?'}</b><span>${name}</span><small>${sub}</small></button>`;
+    tpList.innerHTML = card(0, 'Random team', 'from the difficulty you picked')
+      + card(201, 'The FEDS (AI 201)', 'your robot, played by the AI', ' us')
+      + list.map((t) => card(t.team, t.name, `EPA ${Math.round(t.epa)}`)).join('');
+    tpList.querySelectorAll('[data-team]').forEach((b) => b.addEventListener('click', () => {
+      const n = +b.dataset.team;
+      // the same team can't be in two slots
+      settings.picks = settings.picks.map((x, k) => (k !== pickSlot && x === n ? 0 : x));
+      settings.picks[pickSlot] = n;
+      savePicks(); closePicker();
+    }));
+  };
+  tpSearch.addEventListener('input', renderTeamList);
+  const openPicker = (i) => {
+    pickSlot = i;
+    document.getElementById('tp-title').textContent = `Pick opponent ${i + 1}`;
+    tpSearch.value = '';
+    renderTeamList();
+    picker.hidden = false; ui.menu.hidden = true;
+    nav.reset();
+  };
+  const closePicker = () => { picker.hidden = true; ui.menu.hidden = false; renderPicks(); nav.reset(); };
+  document.getElementById('tp-close').addEventListener('click', closePicker);
   const mapBtns = document.querySelectorAll('[data-map]');
   mapBtns.forEach((b) => b.addEventListener('click', () => {
     settings.map = b.dataset.map;
@@ -313,7 +349,7 @@ async function init() {
     document.querySelectorAll('[data-vs]').forEach((b) => b.classList.toggle('on', b.dataset.vs === settings.vs));
     document.querySelectorAll('[data-ailevel]').forEach((b) => b.classList.toggle('on', b.dataset.ailevel === settings.aiLevel));
     document.getElementById('ai-level-opt').hidden = settings.vs === 'off';
-    if (pickBox.childElementCount !== (settings.vs === 'off' ? 0 : +settings.vs.split('v')[1])) renderPicks();
+    if (pickBox.querySelectorAll('.pick-slots button').length !== (settings.vs === 'off' ? 0 : +settings.vs.split('v')[1])) renderPicks();
   };
   allianceBtns.forEach((b) => b.addEventListener('click', () => { settings.alliance = b.dataset.alliance; refreshMenu(); restart(); }));
   stationBtns.forEach((b) => b.addEventListener('click', () => { settings.station = +b.dataset.station; settings.camDs = undefined; refreshMenu(); restart(); }));
@@ -402,6 +438,7 @@ async function init() {
   document.getElementById('pause-settings').addEventListener('click', openSettings);
   settingsPanel.querySelector('.settings-close').addEventListener('click', closeSettings);
   addEventListener('keydown', (e) => { if (e.code === 'Escape' && !settingsPanel.hidden) { e.stopPropagation(); closeSettings(); } }, true);
+  addEventListener('keydown', (e) => { if (e.code === 'Escape' && !picker.hidden) { e.stopPropagation(); closePicker(); } }, true);
   document.getElementById('pause-controls').addEventListener('click', openControls);
 
   // Menu navigation reads the controller's standard buttons directly, so it works even if the
@@ -431,6 +468,9 @@ async function init() {
     const pad = input.activePad();
     if (controls.open) {
       controls.update();
+    } else if (!picker.hidden) {
+      if (navPressed(pad, PAD.B)) closePicker();
+      else nav.update(picker, pad, dt);
     } else if (!settingsPanel.hidden) {
       if (navPressed(pad, PAD.B)) closeSettings();
       else nav.update(settingsPanel, pad, dt);
